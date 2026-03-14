@@ -1,0 +1,7 @@
+# 显示名称|Django 测试标签
+认证服务单元测试|apps.accounts.tests.test_auth_services_unit
+系统初始化命令单元测试|apps.accounts.tests.test_bootstrap_command
+档案服务单元测试|apps.archives.tests.test_archive_services_unit
+借阅服务单元测试|apps.borrowing.tests.test_borrowing_services_unit
+销毁服务单元测试|apps.destruction.tests.test_destruction_services_unit
+扫描服务单元测试|apps.digitization.tests.test_digitization_services_unit

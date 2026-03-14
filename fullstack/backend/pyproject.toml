@@ -1,0 +1,31 @@
+[project]
+name = "lanchang-archives-backend"
+version = "0.1.0"
+description = "岚仓档案数字化与流转系统后端"
+requires-python = ">=3.12"
+dependencies = [
+    "celery==5.4.0",
+    "django==5.1.7",
+    "django-cors-headers==4.4.0",
+    "django-filter==24.3",
+    "djangorestframework==3.16.1",
+    "djangorestframework-simplejwt==5.3.1",
+    "openpyxl==3.1.5",
+    "Pillow==11.1.0",
+    "PyMuPDF==1.25.3",
+    "python-barcode==0.15.1",
+    "python-dotenv==1.0.1",
+    "qrcode[pil]==8.0",
+    "redis==5.2.1",
+]
+
+[project.optional-dependencies]
+mysql = [
+    "mysqlclient==2.2.7",
+]
+deploy = [
+    "gunicorn==23.0.0",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,49 @@
+name: lanchang-archives
+
+services:
+  mysql:
+    image: mysql:8.1
+    container_name: lanchang-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: lanchang_archive
+      MYSQL_USER: archive
+      MYSQL_PASSWORD: archive123456
+      MYSQL_ROOT_PASSWORD: root123456
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - ./volumns/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - archive_net
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: lanchang-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./volumns/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - archive_net
+
+networks:
+  archive_net:
+    driver: bridge

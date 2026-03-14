@@ -1,0 +1,160 @@
+name: asd-system
+
+x-backend-env: &backend-env
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-secret-key-for-asd-system-2026}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+  DJANGO_CORS_ALLOW_ALL: ${DJANGO_CORS_ALLOW_ALL:-true}
+  DB_ENGINE: mysql
+  DB_HOST: mysql
+  DB_PORT: 3306
+  DB_NAME: ${DB_NAME:-lanchang_archive}
+  DB_USER: ${DB_USER:-archive}
+  DB_PASSWORD: ${DB_PASSWORD:-archive123456}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  REDIS_DB: 0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+  EMAIL_HOST: ${EMAIL_HOST:-}
+  EMAIL_PORT: ${EMAIL_PORT:-25}
+  EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+  EMAIL_USE_TLS: ${EMAIL_USE_TLS:-false}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-noreply@asd-system.local}
+  BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-INFO}
+  BACKEND_LOG_DIR: /app/logs
+  BACKEND_LOG_ROTATION_WHEN: ${BACKEND_LOG_ROTATION_WHEN:-midnight}
+  BACKEND_LOG_ROTATION_INTERVAL: ${BACKEND_LOG_ROTATION_INTERVAL:-1}
+  BACKEND_LOG_BACKUP_COUNT: ${BACKEND_LOG_BACKUP_COUNT:-14}
+  SYSTEM_STORAGE_WARNING_PERCENT: ${SYSTEM_STORAGE_WARNING_PERCENT:-85}
+  SYSTEM_STORAGE_CRITICAL_PERCENT: ${SYSTEM_STORAGE_CRITICAL_PERCENT:-95}
+
+services:
+  mysql:
+    image: mysql:8.1
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-lanchang_archive}
+      MYSQL_USER: ${DB_USER:-archive}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-archive123456}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend-init:
+    build:
+      context: ../backend
+    environment:
+      <<: *backend-env
+      ASD_ADMIN_USERNAME: ${ASD_ADMIN_USERNAME:-admin}
+      ASD_ADMIN_PASSWORD: ${ASD_ADMIN_PASSWORD:-Admin12345}
+      ASD_ADMIN_REAL_NAME: ${ASD_ADMIN_REAL_NAME:-系统管理员}
+      ASD_ROOT_DEPT_CODE: ${ASD_ROOT_DEPT_CODE:-ROOT}
+      ASD_ROOT_DEPT_NAME: ${ASD_ROOT_DEPT_NAME:-总部}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_media:/app/media
+      - backend_logs:/app/logs
+      - ../runtime/deployment_runtime:/deployment_runtime
+    command: ["sh", "scripts/init_system.sh"]
+    restart: "no"
+
+  backend:
+    build:
+      context: ../backend
+    environment:
+      <<: *backend-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend-init:
+        condition: service_completed_successfully
+    volumes:
+      - backend_media:/app/media
+      - backend_logs:/app/logs
+    command: ["sh", "scripts/start_backend.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/health/', timeout=5).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+    environment:
+      <<: *backend-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend-init:
+        condition: service_completed_successfully
+    volumes:
+      - backend_media:/app/media
+      - backend_logs:/app/logs
+    command: ["sh", "scripts/start_worker.sh"]
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ../backend
+    environment:
+      <<: *backend-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend-init:
+        condition: service_completed_successfully
+    volumes:
+      - backend_media:/app/media
+      - backend_logs:/app/logs
+    command: ["sh", "scripts/start_beat.sh"]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${ASD_HTTP_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_media:
+  backend_logs:

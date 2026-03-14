@@ -1,0 +1,20 @@
+[Unit]
+Description=ASDSystem Celery Worker
+After=network-online.target asd-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/asd-system/fullstack/backend
+EnvironmentFile=/srv/asd-system/fullstack/deploy/env/backend.production.env
+ExecStart=/srv/asd-system/fullstack/backend/.venv/bin/celery -A config.celery:app worker --loglevel=info --concurrency=4
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

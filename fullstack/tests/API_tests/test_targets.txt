@@ -1,0 +1,12 @@
+# 显示名称|Django 测试标签
+认证接口测试|apps.accounts.tests.test_auth_api
+系统管理接口测试|apps.accounts.tests.test_management_api
+档案接口测试|apps.archives.tests.test_archive_api
+组织接口测试|apps.organizations.tests.test_department_api
+系统健康接口测试|apps.system.tests.test_health_api
+扫描任务接口测试|apps.digitization.tests.test_scan_task_api
+借阅接口测试|apps.borrowing.tests.test_borrowing_api
+通知接口测试|apps.notifications.tests.test_notification_api
+销毁接口测试|apps.destruction.tests.test_destruction_api
+审计接口测试|apps.audit.tests.test_audit_api
+报表接口测试|apps.reports.tests.test_reports_api
