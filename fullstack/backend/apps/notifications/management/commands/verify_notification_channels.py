@@ -4,6 +4,8 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.notifications.services import (
     get_email_channel_diagnostics,
+    mask_email_address,
+    mask_webhook_url,
     send_verification_email,
     send_verification_webhook,
 )
@@ -53,7 +55,7 @@ class Command(BaseCommand):
                 failures.append(f"邮件链路验证失败：{exc}")
                 results["email"] = {
                     "status": "failed",
-                    "receiver_email": email,
+                    "receiver_email": mask_email_address(email),
                     "backend": diagnostics["backend"],
                     "issues": diagnostics["issues"],
                     "message": str(exc),
@@ -61,7 +63,7 @@ class Command(BaseCommand):
             else:
                 results["email"] = {
                     "status": "success",
-                    "receiver_email": email,
+                    "receiver_email": mask_email_address(email),
                     "backend": diagnostics["backend"],
                     "email_task_id": email_task.id,
                     "sent_at": email_task.sent_at.isoformat() if email_task.sent_at else None,
@@ -80,13 +82,13 @@ class Command(BaseCommand):
                 failures.append(f"Webhook 链路验证失败：{exc}")
                 results["webhook"] = {
                     "status": "failed",
-                    "webhook": webhook,
+                    "webhook": mask_webhook_url(webhook),
                     "message": str(exc),
                 }
             else:
                 results["webhook"] = {
                     "status": "success",
-                    "webhook": webhook,
+                    "webhook": mask_webhook_url(webhook),
                     "status_code": webhook_result["status_code"],
                     "response_text": webhook_result["response_text"],
                 }

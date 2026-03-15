@@ -22,7 +22,7 @@ def get_list(name: str, default: str = "") -> list[str]:
 
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-secret-key-for-asd-system-2026")
-DEBUG = get_bool("DJANGO_DEBUG", True)
+DEBUG = get_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,backend")
 
 INSTALLED_APPS = [
@@ -135,7 +135,7 @@ CACHES = {
     }
 }
 
-if get_bool("DJANGO_CORS_ALLOW_ALL", True):
+if get_bool("DJANGO_CORS_ALLOW_ALL", False):
     CORS_ALLOW_ALL_ORIGINS = True
 else:
     CORS_ALLOWED_ORIGINS = get_list("DJANGO_CORS_ALLOWED_ORIGINS")

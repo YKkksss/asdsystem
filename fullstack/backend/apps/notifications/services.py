@@ -1,6 +1,7 @@
 import logging
 import json
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -20,6 +21,50 @@ LOCAL_ONLY_EMAIL_BACKENDS = {
     "django.core.mail.backends.locmem.EmailBackend",
     "django.core.mail.backends.dummy.EmailBackend",
 }
+
+
+def _mask_segment(value: str) -> str:
+    if not value:
+        return "***"
+    if len(value) == 1:
+        return f"{value}***"
+    return f"{value[0]}***{value[-1]}"
+
+
+def mask_email_address(email: str) -> str:
+    local_part, separator, domain_part = email.partition("@")
+    if not separator or not local_part or not domain_part:
+        return "***"
+
+    domain_name, domain_separator, domain_suffix = domain_part.partition(".")
+    masked_domain = _mask_segment(domain_name)
+    if domain_separator and domain_suffix:
+        masked_domain = f"{masked_domain}.{domain_suffix}"
+
+    return f"{_mask_segment(local_part)}@{masked_domain}"
+
+
+def mask_webhook_url(webhook_url: str) -> str:
+    parsed = urlsplit(webhook_url)
+    if not parsed.scheme or not parsed.netloc:
+        return "***"
+
+    host = parsed.hostname or parsed.netloc
+    host_parts = [part for part in host.split(".") if part]
+    if not host_parts:
+        return "***"
+
+    if len(host_parts) == 1:
+        masked_host = _mask_segment(host_parts[0])
+    else:
+        masked_host = ".".join([_mask_segment(part) for part in host_parts[:-1]] + [host_parts[-1]])
+
+    port_part = f":{parsed.port}" if parsed.port else ""
+    path_part = "/***" if parsed.path and parsed.path != "/" else ""
+    if parsed.query:
+        path_part = path_part or "/***"
+
+    return f"{parsed.scheme}://{masked_host}{port_part}{path_part}"
 
 
 @transaction.atomic
@@ -75,7 +120,7 @@ def create_email_task(
         "创建邮件任务",
         extra={
             "email_task_id": email_task.id,
-            "receiver_email": receiver_email,
+            "receiver_email": mask_email_address(receiver_email),
             "biz_type": biz_type,
             "biz_id": biz_id,
         },
@@ -106,13 +151,25 @@ def process_email_task(email_task_id: int) -> None:
         email_task.send_status = EmailTaskStatus.SUCCESS
         email_task.sent_at = timezone.now()
         email_task.save(update_fields=["send_status", "sent_at", "updated_at"])
-        logger.info("邮件发送成功", extra={"email_task_id": email_task.id})
+        logger.info(
+            "邮件发送成功",
+            extra={
+                "email_task_id": email_task.id,
+                "receiver_email": mask_email_address(email_task.receiver_email),
+            },
+        )
     except Exception as exc:
         email_task.send_status = EmailTaskStatus.FAILED
         email_task.retry_count += 1
         email_task.error_message = str(exc)
         email_task.save(update_fields=["send_status", "retry_count", "error_message", "updated_at"])
-        logger.exception("邮件发送失败", extra={"email_task_id": email_task.id})
+        logger.exception(
+            "邮件发送失败",
+            extra={
+                "email_task_id": email_task.id,
+                "receiver_email": mask_email_address(email_task.receiver_email),
+            },
+        )
 
 
 def dispatch_email_task(email_task: EmailTask) -> None:
@@ -208,13 +265,16 @@ def send_verification_webhook(
             response_text = response.read().decode("utf-8", errors="replace")
     except HTTPError as exc:
         response_text = exc.read().decode("utf-8", errors="replace")
-        logger.exception("Webhook 验证发送失败", extra={"webhook_url": webhook_url, "status_code": exc.code})
+        logger.exception(
+            "Webhook 验证发送失败",
+            extra={"webhook_url": mask_webhook_url(webhook_url), "status_code": exc.code},
+        )
         raise RuntimeError(f"Webhook 返回异常状态 {exc.code}：{response_text or exc.reason}") from exc
     except URLError as exc:
-        logger.exception("Webhook 验证发送失败", extra={"webhook_url": webhook_url})
+        logger.exception("Webhook 验证发送失败", extra={"webhook_url": mask_webhook_url(webhook_url)})
         raise RuntimeError(f"Webhook 请求失败：{exc.reason}") from exc
 
-    logger.info("Webhook 验证发送成功", extra={"webhook_url": webhook_url, "status_code": status_code})
+    logger.info("Webhook 验证发送成功", extra={"webhook_url": mask_webhook_url(webhook_url), "status_code": status_code})
     return {
         "status_code": status_code,
         "response_text": response_text,

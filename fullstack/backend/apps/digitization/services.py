@@ -237,6 +237,61 @@ def _finalize_archive_file_status(archive_file: ArchiveFile) -> ArchiveFile:
     return archive_file
 
 
+def sync_scan_task_item_status(task_item_id: int) -> ScanTaskItem | None:
+    task_item = ScanTaskItem.objects.select_related("task").filter(id=task_item_id).first()
+    if not task_item:
+        return None
+
+    files = ArchiveFile.objects.filter(scan_task_item_id=task_item.id)
+    file_count = files.count()
+    latest_uploaded_at = files.order_by("-created_at").values_list("created_at", flat=True).first()
+
+    next_status = ScanTaskItemStatus.PENDING
+    next_error_message = None
+
+    if file_count > 0:
+        if files.filter(status=ArchiveFileStatus.FAILED).exists():
+            next_status = ScanTaskItemStatus.FAILED
+            latest_failed_job = (
+                FileProcessJob.objects.filter(
+                    archive_file__scan_task_item_id=task_item.id,
+                    status=FileProcessJobStatus.FAILED,
+                )
+                .order_by("-id")
+                .first()
+            )
+            next_error_message = (
+                latest_failed_job.error_message if latest_failed_job and latest_failed_job.error_message else "文件处理失败。"
+            )
+        elif files.filter(status=ArchiveFileStatus.PROCESSING).exists():
+            next_status = ScanTaskItemStatus.PROCESSING
+        else:
+            next_status = ScanTaskItemStatus.COMPLETED
+
+    update_fields: list[str] = []
+    if task_item.status != next_status:
+        task_item.status = next_status
+        update_fields.append("status")
+
+    if task_item.uploaded_file_count != file_count:
+        task_item.uploaded_file_count = file_count
+        update_fields.append("uploaded_file_count")
+
+    if task_item.last_uploaded_at != latest_uploaded_at:
+        task_item.last_uploaded_at = latest_uploaded_at
+        update_fields.append("last_uploaded_at")
+
+    if task_item.error_message != next_error_message:
+        task_item.error_message = next_error_message
+        update_fields.append("error_message")
+
+    if update_fields:
+        task_item.save(update_fields=update_fields + ["updated_at"])
+
+    sync_scan_task_counters(task_item.task)
+    return task_item
+
+
 def process_file_process_job(job_id: int) -> None:
     job = FileProcessJob.objects.select_related("archive_file").filter(id=job_id).first()
     if not job:
@@ -293,6 +348,8 @@ def process_file_process_job(job_id: int) -> None:
         logger.exception("处理文件任务失败", extra={"job_id": job.id, "archive_file_id": archive_file.id})
     finally:
         _finalize_archive_file_status(archive_file)
+        if archive_file.scan_task_item_id:
+            sync_scan_task_item_status(archive_file.scan_task_item_id)
 
 
 def dispatch_file_process_job(job: FileProcessJob) -> None:
@@ -305,6 +362,16 @@ def dispatch_file_process_job(job: FileProcessJob) -> None:
     except Exception:
         logger.warning("Celery 不可用，回退为同步处理", extra={"job_id": job.id})
         process_file_process_job(job.id)
+
+
+def dispatch_file_process_jobs_after_commit(job_ids: list[int]) -> None:
+    # 仅在事务真正提交后再派发任务，避免 Worker 读取到尚未提交的任务记录。
+    def _dispatch() -> None:
+        jobs = FileProcessJob.objects.filter(id__in=job_ids).order_by("id")
+        for job in jobs:
+            dispatch_file_process_job(job)
+
+    transaction.on_commit(_dispatch)
 
 
 @transaction.atomic
@@ -365,12 +432,11 @@ def upload_files_to_scan_task_item(
                     )
                 )
 
-            for job in jobs:
-                dispatch_file_process_job(job)
+            dispatch_file_process_jobs_after_commit([job.id for job in jobs])
 
         task_item.uploaded_file_count += len(uploaded_files)
         task_item.last_uploaded_at = timezone.now()
-        task_item.status = ScanTaskItemStatus.COMPLETED
+        task_item.status = ScanTaskItemStatus.PROCESSING
         task_item.error_message = None
         task_item.save(
             update_fields=["uploaded_file_count", "last_uploaded_at", "status", "error_message", "updated_at"]

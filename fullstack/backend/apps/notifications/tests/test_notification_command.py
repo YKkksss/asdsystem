@@ -33,6 +33,8 @@ class VerifyNotificationChannelsCommandTests(TestCase):
         self.assertEqual(email_task.send_status, EmailTaskStatus.SUCCESS)
         self.assertEqual(email_task.receiver_email, "ops@example.com")
         self.assertIn('"status": "success"', stdout.getvalue())
+        self.assertIn('"receiver_email": "o***s@e***e.com"', stdout.getvalue())
+        self.assertNotIn('"receiver_email": "ops@example.com"', stdout.getvalue())
         mocked_send_mail.assert_called_once()
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
@@ -59,4 +61,6 @@ class VerifyNotificationChannelsCommandTests(TestCase):
         )
 
         self.assertIn('"status": "success"', stdout.getvalue())
+        self.assertIn('"webhook": "https://e***e.com/***"', stdout.getvalue())
+        self.assertNotIn('"webhook": "https://example.com/webhook"', stdout.getvalue())
         self.assertIn('"status_code": 200', stdout.getvalue())

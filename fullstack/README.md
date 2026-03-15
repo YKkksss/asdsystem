@@ -11,7 +11,7 @@
 3. 档案主数据、实体位置、条码二维码生成
 4. 扫描任务、文件上传、缩略图与文本提取
 5. 组合检索、密级脱敏、文件在线预览与下载留痕
-6. 借阅申请、审批、出库、归还、催还通知
+6. 借阅申请、审批、出库、归还、催还通知与通知链路脱敏
 7. 销毁申请、审批、执行留痕
 8. 审计日志、报表统计与 CSV 导出
 9. `uv` 依赖管理、Celery 异步任务、MySQL / Redis 基础设施编排
@@ -58,6 +58,16 @@ fullstack/
 
 2. 当未传分页参数时，接口仍保持原有数组结构，兼容既有下拉框和旧调用。
 3. 当前已优先接入服务端分页的页面包括档案列表、借阅申请列表、借阅审批、借阅出库、借阅归还、销毁申请、扫描任务、通知中心、审计日志。
+
+## 通知脱敏与权限校验约定
+
+本轮联调补充了通知链路与文件访问权限的安全收口，当前约定如下：
+
+1. `verify_notification_channels` 管理命令、Webhook 验证日志、失败告警日志不会直接输出原始 Webhook 地址，统一只展示脱敏后的地址。
+2. Webhook 脱敏按“协议保留、主机分段脱敏、路径折叠”的方式输出，例如 `https://hooks.example.com/api/notify?token=abc` 会记录为 `https://h***s.e***e.com/***`。
+3. 邮件地址输出同样采用脱敏策略，避免在终端日志、巡检日志和命令回显中暴露完整账号。
+4. 文件预览、下载、摘要、责任者等敏感字段的可见性由后端按密级和责任人关系统一裁剪，前端只消费后端已脱敏结果，不做额外字段映射或前端侧伪权限判断。
+5. 前端 E2E 已同时覆盖“有权限访问”和“密级不足被限制”两类文件访问场景，确保页面不会在无权限时暴露预览或下载入口。
 
 ## 启动与部署
 
@@ -211,6 +221,7 @@ uv run manage.py verify_notification_channels --webhook https://example.com/webh
 uv run manage.py verify_notification_channels --email ops@example.com --webhook https://example.com/webhook --webhook-header "Authorization: Bearer token"
 ```
 
+- 上述命令在终端中的 `webhook` 字段会自动脱敏，便于保留排障线索同时避免泄露真实回调地址。
 - 若邮件服务使用 465 端口，请在 `.env` 中配置 `EMAIL_USE_SSL=true`；若使用 587 STARTTLS，请配置 `EMAIL_USE_TLS=true` 且 `EMAIL_USE_SSL=false`。
 
 后端目录当前采用 DRF 常见分层组织：
@@ -254,6 +265,8 @@ backend/
 - 后端静态检查：`cd backend && uv run manage.py check`
 - 前端类型校验：`cd frontend && npm run type-check`
 - 分页与通知链路定向测试：`cd backend && uv run manage.py test apps.archives.tests.test_archive_api apps.audit.tests.test_audit_api apps.borrowing.tests.test_borrowing_api apps.notifications.tests.test_notification_api apps.notifications.tests.test_notification_command`
+- 通知脱敏定向测试：`cd backend && uv run manage.py test apps.notifications.tests.test_notification_services_unit apps.notifications.tests.test_notification_command`
+- 文件访问权限正负向回归：`cd frontend && npx playwright test tests/e2e/archive-file-access.spec.ts tests/e2e/archive-file-access-restricted.spec.ts`
 - 单元测试：`./scripts/run_tests.sh unit`
 - API 接口测试：`./scripts/run_tests.sh api`
 - 前端 E2E 联调测试：`./scripts/run_tests.sh e2e`

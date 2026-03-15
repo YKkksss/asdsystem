@@ -5,3 +5,5 @@
 借阅服务单元测试|apps.borrowing.tests.test_borrowing_services_unit
 销毁服务单元测试|apps.destruction.tests.test_destruction_services_unit
 扫描服务单元测试|apps.digitization.tests.test_digitization_services_unit
+通知服务单元测试|apps.notifications.tests.test_notification_services_unit
+通知链路验证命令测试|apps.notifications.tests.test_notification_command
