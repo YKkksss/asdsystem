@@ -8,13 +8,13 @@ from barcode.writer import ImageWriter
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.models import ArchiveFileAccessAction
 from apps.audit.services import build_watermark_text, issue_archive_file_access_ticket, record_audit_log
-from apps.accounts.models import SecurityClearance
+from apps.accounts.models import DataScope, SecurityClearance
 from apps.archives.models import (
     ArchiveBarcode,
     ArchiveCodeType,
@@ -41,6 +41,13 @@ SECURITY_CLEARANCE_ORDER = {
     SecurityClearance.SECRET: 3,
     SecurityClearance.CONFIDENTIAL: 4,
     SecurityClearance.TOP_SECRET: 5,
+}
+
+DATA_SCOPE_PRIORITY = {
+    DataScope.SELF: 1,
+    DataScope.DEPT: 2,
+    DataScope.DEPT_AND_CHILD: 3,
+    DataScope.ALL: 4,
 }
 
 ARCHIVE_SNAPSHOT_FIELDS = [
@@ -95,6 +102,73 @@ def _resolve_operator(operator_id: int | None):
     if not operator_id:
         return None
     return User.objects.filter(id=operator_id, status=True).first()
+
+
+def resolve_user_archive_data_scope(user) -> str:
+    if _user_is_admin(user):
+        return DataScope.ALL
+
+    if not user or not getattr(user, "is_authenticated", False) or not hasattr(user, "roles"):
+        return DataScope.SELF
+
+    resolved_scope = DataScope.SELF
+    role_scopes = user.roles.filter(status=True).values_list("data_scope", flat=True)
+    for scope in role_scopes:
+        if DATA_SCOPE_PRIORITY.get(scope, 0) > DATA_SCOPE_PRIORITY[resolved_scope]:
+            resolved_scope = scope
+    return resolved_scope
+
+
+def filter_archive_queryset_by_user_scope(queryset, user):
+    if _user_is_admin(user):
+        return queryset
+
+    if not user or not getattr(user, "is_authenticated", False):
+        return queryset.none()
+
+    user_dept_id = getattr(user, "dept_id", None)
+    if not user_dept_id:
+        return queryset.none()
+
+    scope = resolve_user_archive_data_scope(user)
+    if scope == DataScope.ALL:
+        return queryset
+
+    own_archive_filter = Q(responsible_dept__isnull=True, created_by=user.id)
+    if scope == DataScope.DEPT:
+        return queryset.filter(Q(responsible_dept_id=user_dept_id) | own_archive_filter)
+
+    if scope == DataScope.DEPT_AND_CHILD:
+        user_dept = getattr(user, "dept", None)
+        user_dept_path = getattr(user_dept, "dept_path", "")
+        if not user_dept_path:
+            return queryset.filter(Q(responsible_dept_id=user_dept_id) | own_archive_filter)
+
+        return queryset.filter(
+            Q(responsible_dept__dept_path=user_dept_path)
+            | Q(responsible_dept__dept_path__startswith=f"{user_dept_path}/")
+            | own_archive_filter
+        )
+
+    user_real_name = (getattr(user, "real_name", "") or "").strip()
+    self_scope_filter = Q(responsible_dept_id=user_dept_id) | Q(created_by=user.id) | own_archive_filter
+    # 档案主数据当前以责任部门作为主要归属单元，SELF 在档案模块按主部门收敛，
+    # 同时保留本人创建或负责记录的访问能力，避免出现“有权限但完全看不到本人业务数据”的情况。
+    if user_real_name:
+        self_scope_filter |= Q(responsible_person=user_real_name)
+
+    return queryset.filter(self_scope_filter)
+
+
+def validate_archive_data_scope(*, archive: ArchiveRecord, user) -> None:
+    accessible = filter_archive_queryset_by_user_scope(
+        ArchiveRecord.objects.filter(id=archive.id),
+        user,
+    ).exists()
+    if accessible:
+        return
+
+    raise PermissionDenied("当前账号无权访问所属范围外的档案。")
 
 
 def user_can_view_archive_sensitive_fields(user, archive: ArchiveRecord) -> bool:
@@ -454,6 +528,7 @@ def batch_print_archive_codes(*, archive_ids: list[int], operator_id: int) -> li
 
 
 def validate_archive_file_access_permission(*, archive_file: ArchiveFile, user) -> None:
+    validate_archive_data_scope(archive=archive_file.archive, user=user)
     if archive_file.status != ArchiveFileStatus.ACTIVE:
         raise ValidationError("当前档案文件尚未处理完成，暂不可访问。")
     if not user_can_view_archive_sensitive_fields(user, archive_file.archive):

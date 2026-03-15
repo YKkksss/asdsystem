@@ -128,6 +128,26 @@ export interface ApiResponse<T> {
   data: T
 }
 
+export interface PaginationMeta {
+  page: number
+  page_size: number
+  total: number
+  total_pages: number
+  has_next: boolean
+  has_previous: boolean
+}
+
+export interface PaginatedResponseData<T> {
+  items: T[]
+  pagination: PaginationMeta
+}
+
+export interface PaginationQueryParams {
+  page?: number
+  page_size?: number
+  paginate?: boolean
+}
+
 export function buildServerAssetUrl(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`
   if (/^https?:\/\//.test(API_BASE_URL)) {

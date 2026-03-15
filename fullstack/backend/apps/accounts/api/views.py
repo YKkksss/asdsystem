@@ -24,6 +24,7 @@ from apps.accounts.services import (
     unlock_user,
 )
 from apps.common.permissions import IsSystemAdmin
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import error_response, success_response
 
 
@@ -31,6 +32,7 @@ User = get_user_model()
 
 
 class RoleViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -44,8 +46,7 @@ class RoleViewSet(
     ordering_fields = ["id", "created_at"]
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         return success_response(data=self.get_serializer(self.get_object()).data)
@@ -69,6 +70,7 @@ class RoleViewSet(
 
 
 class SystemPermissionViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -82,8 +84,7 @@ class SystemPermissionViewSet(
     ordering_fields = ["sort_order", "id", "created_at"]
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         return success_response(data=self.get_serializer(self.get_object()).data)
@@ -107,6 +108,7 @@ class SystemPermissionViewSet(
 
 
 class UserViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -122,8 +124,7 @@ class UserViewSet(
     ordering_fields = ["id", "created_at", "last_login_at"]
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         return success_response(data=self.get_serializer(self.get_object()).data)

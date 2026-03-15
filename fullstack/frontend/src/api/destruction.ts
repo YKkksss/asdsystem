@@ -1,4 +1,9 @@
-import http, { buildServerAssetUrl, type ApiResponse } from "@/api/http"
+import http, {
+  buildServerAssetUrl,
+  type ApiResponse,
+  type PaginatedResponseData,
+  type PaginationQueryParams,
+} from "@/api/http"
 import { archiveUploadMaxSizeMb, buildUploadAccept, validateUploadFiles } from "@/utils/upload"
 
 export const destroyAttachmentAllowedExtensions = ["pdf", "jpg", "jpeg", "png"] as const
@@ -110,6 +115,21 @@ export interface DestroyExecutePayload {
 
 export async function fetchDestroyApplications(params?: DestroyApplicationQueryParams) {
   const response = await http.get<ApiResponse<DestroyApplication[]>>("/destruction/applications/", { params })
+  return response.data
+}
+
+export async function fetchDestroyApplicationsPage(
+  params?: DestroyApplicationQueryParams & PaginationQueryParams,
+) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<DestroyApplication>>>(
+    "/destruction/applications/",
+    {
+      params: {
+        ...params,
+        paginate: true,
+      },
+    },
+  )
   return response.data
 }
 

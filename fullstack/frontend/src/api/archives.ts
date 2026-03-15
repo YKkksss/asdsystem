@@ -1,4 +1,9 @@
-import http, { buildServerAssetUrl, type ApiResponse } from "@/api/http"
+import http, {
+  buildServerAssetUrl,
+  type ApiResponse,
+  type PaginatedResponseData,
+  type PaginationQueryParams,
+} from "@/api/http"
 
 
 export interface ArchiveStorageLocation {
@@ -149,6 +154,19 @@ export async function fetchArchiveLocations(params?: { search?: string }) {
   return response.data
 }
 
+export async function fetchArchiveLocationsPage(params?: { search?: string } & PaginationQueryParams) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<ArchiveStorageLocation>>>(
+    "/archives/storage-locations/",
+    {
+      params: {
+        ...params,
+        paginate: true,
+      },
+    },
+  )
+  return response.data
+}
+
 export async function createArchiveLocation(payload: ArchiveLocationPayload) {
   const response = await http.post<ApiResponse<ArchiveStorageLocation>>(
     "/archives/storage-locations/",
@@ -178,6 +196,16 @@ export interface ArchiveQueryParams {
 
 export async function fetchArchives(params?: ArchiveQueryParams) {
   const response = await http.get<ApiResponse<ArchiveRecord[]>>("/archives/records/", { params })
+  return response.data
+}
+
+export async function fetchArchivesPage(params?: ArchiveQueryParams & PaginationQueryParams) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<ArchiveRecord>>>("/archives/records/", {
+    params: {
+      ...params,
+      paginate: true,
+    },
+  })
   return response.data
 }
 

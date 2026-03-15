@@ -32,6 +32,33 @@ fullstack/
   runtime/   运行产物目录
 ```
 
+## 列表分页约定
+
+当前项目的高频列表接口已经支持可选服务端分页，推荐在列表页、大数据场景和报表查询中统一使用：
+
+1. 当请求参数包含 `page`、`page_size` 或 `paginate=true` 时，接口返回分页结构：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [],
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 100,
+      "total_pages": 5,
+      "has_next": true,
+      "has_previous": false
+    }
+  }
+}
+```
+
+2. 当未传分页参数时，接口仍保持原有数组结构，兼容既有下拉框和旧调用。
+3. 当前已优先接入服务端分页的页面包括档案列表、借阅申请列表、借阅审批、借阅出库、借阅归还、销毁申请、扫描任务、通知中心、审计日志。
+
 ## 启动与部署
 
 ## 一键部署
@@ -66,12 +93,14 @@ fullstack/
 - 其他设备访问：`http://服务器IP或域名:8080`
 - 后端健康检查：`http://127.0.0.1:8080/api/v1/system/health/`
 
-默认初始化账号：
+初始化账号说明：
 
-1. 管理员：`admin / Admin12345`
-2. 档案员：`archivist / Archivist12345`
-3. 借阅人：`borrower / Borrower12345`
-4. 审计员：`auditor / Auditor12345`
+- 一键部署完成后，请以 `runtime/deployment_runtime/accounts.md` 中的实际内容为准。
+- 管理员账号固定为 `admin`，密码优先使用环境变量 `ASD_ADMIN_PASSWORD`；如果未设置，部署脚本会自动生成随机密码并写入账号清单。
+- 固定示例账号：
+- 档案员：`archivist / Archivist12345`
+- 借阅人：`borrower / Borrower12345`
+- 审计员：`auditor / Auditor12345`
 
 ### 方式二：直接使用 Docker Compose
 
@@ -84,12 +113,27 @@ docker compose -f docker/docker-compose.deploy.yaml up -d --build
 1. `docker/docker-compose.deploy.yaml` 已包含前端、后端、MySQL、Redis、Worker、Beat 和初始化服务
 2. 首次启动会自动执行迁移与基础数据初始化
 3. 账号清单同样会输出到 `runtime/deployment_runtime/accounts.md`
-4. 默认已放开 `DJANGO_ALLOWED_HOSTS`，因此换到其他服务器后，直接使用该服务器的 IP 或域名访问也能工作
+4. 默认关闭 `DEBUG` 与全量 CORS，并通过前端 Nginx 固定上游 Host，保证本机和常见内网访问可直接使用
 5. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
 
 ```bash
 ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build
 ```
+
+### 初始化默认账号
+
+以下账号来自 `fullstack/backend/apps/accounts/bootstrap_defaults.py`，适用于本地开发、接口联调和验收演示：
+
+1. 管理员：`admin / 由 ASD_ADMIN_PASSWORD 指定；若未指定则首次部署自动生成`
+2. 档案员：`archivist / Archivist12345`
+3. 借阅人：`borrower / Borrower12345`
+4. 审计员：`auditor / Auditor12345`
+
+说明：
+
+1. 一键部署时，最终账号密码以 `runtime/deployment_runtime/accounts.md` 为准。
+2. 手工执行 `uv run manage.py bootstrap_system --username admin --password 你的安全密码` 时，管理员密码以命令参数为准，其余三个示例账号仍按上述默认值初始化。
+3. 首次登录后建议立即修改所有默认密码，避免继续使用示例口令。
 
 ### 开发启动脚本
 
@@ -124,7 +168,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 当前目录提供 `ops/` 运维脚本目录：
 
 1. `./ops/rotate_runtime_logs.sh`：轮转 `runtime/services/logs/` 与 `backend/logs/`
-2. `./ops/monitor_services.sh`：巡检后端详细健康、Redis、Worker、Beat，并支持 Webhook / 邮件告警
+2. `./ops/monitor_services.sh`：巡检后端详细健康、Redis、Worker、Beat，并支持真实 Webhook / SMTP 邮件告警
 3. `./ops/backup_system.sh`：备份数据库、媒体文件和 `.env`
 4. `./ops/restore_system.sh`：按备份目录恢复数据库和媒体文件
 
@@ -159,6 +203,15 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 - 如果需要接入 MySQL，请先执行 `uv sync --extra mysql`，再在 `.env` 中将 `DB_ENGINE` 改为 `mysql`，并补齐 `DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
 - 首次启动建议先执行 `bootstrap_system` 命令生成根部门、基础角色、各角色示例账号，并输出到 `runtime/deployment_runtime/accounts.md`。
 - 如果需要运行催还扫描、邮件发送、缩略图生成等异步链路，请同时启动 Redis、Celery Worker 和 Celery Beat。
+- 如果需要验证真实外部邮件 / Webhook 链路，可执行：
+
+```bash
+uv run manage.py verify_notification_channels --email ops@example.com
+uv run manage.py verify_notification_channels --webhook https://example.com/webhook
+uv run manage.py verify_notification_channels --email ops@example.com --webhook https://example.com/webhook --webhook-header "Authorization: Bearer token"
+```
+
+- 若邮件服务使用 465 端口，请在 `.env` 中配置 `EMAIL_USE_SSL=true`；若使用 587 STARTTLS，请配置 `EMAIL_USE_TLS=true` 且 `EMAIL_USE_SSL=false`。
 
 后端目录当前采用 DRF 常见分层组织：
 
@@ -184,7 +237,7 @@ backend/
 - 前端开发服务：`http://127.0.0.1:5173`
 - 后端开发服务：`http://127.0.0.1:8000`
 - 后端健康检查：`http://127.0.0.1:8000/api/v1/system/health/`
-- 后端详细健康检查：`http://127.0.0.1:8000/api/v1/system/health/detail/`
+- 后端详细健康检查：`http://127.0.0.1:8000/api/v1/system/health/detail/`（仅管理员或内网请求可访问）
 
 ## 基础设施启动
 
@@ -200,6 +253,7 @@ backend/
 
 - 后端静态检查：`cd backend && uv run manage.py check`
 - 前端类型校验：`cd frontend && npm run type-check`
+- 分页与通知链路定向测试：`cd backend && uv run manage.py test apps.archives.tests.test_archive_api apps.audit.tests.test_audit_api apps.borrowing.tests.test_borrowing_api apps.notifications.tests.test_notification_api apps.notifications.tests.test_notification_command`
 - 单元测试：`./scripts/run_tests.sh unit`
 - API 接口测试：`./scripts/run_tests.sh api`
 - 前端 E2E 联调测试：`./scripts/run_tests.sh e2e`
@@ -207,5 +261,5 @@ backend/
 
 ## 当前待完善重点
 
-1. 接入真实企业告警通道并完成一次告警演练
+1. 在正式企业 SMTP / Webhook 地址上完成一次实网演练并固化告警参数
 2. 结合正式生产环境收紧默认密码、域名白名单、HTTPS 与防火墙策略

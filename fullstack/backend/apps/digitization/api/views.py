@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
 from apps.common.permissions import IsArchiveManager
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import error_response, success_response
 from apps.digitization.api.serializers import (
     ScanAssigneeSerializer,
@@ -19,8 +20,8 @@ from apps.digitization.services import upload_files_to_scan_task_item
 User = get_user_model()
 
 
-class ScanTaskViewSet(viewsets.GenericViewSet):
-    queryset = ScanTask.objects.prefetch_related("items__archive").order_by("-id")
+class ScanTaskViewSet(OptionalPaginationListMixin, viewsets.GenericViewSet):
+    queryset = ScanTask.objects.order_by("-id")
     search_fields = ["task_no", "task_name", "remark"]
     ordering_fields = ["id", "created_at", "started_at", "finished_at"]
     filterset_fields = ["status", "assigned_user_id"]
@@ -37,8 +38,7 @@ class ScanTaskViewSet(viewsets.GenericViewSet):
         return ScanTaskListSerializer
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object())

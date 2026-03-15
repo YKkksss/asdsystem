@@ -31,10 +31,6 @@ def build_health_detail_payload() -> dict[str, Any]:
 
     payload = _build_base_payload(status=resolve_health_status(checks))
     payload["checks"] = checks
-    payload["environment"] = {
-        "debug": settings.DEBUG,
-        "db_engine": settings.DB_ENGINE,
-    }
     return payload
 
 
@@ -100,7 +96,6 @@ def check_storage_health() -> dict[str, Any]:
     return {
         "status": status,
         "message": message,
-        "path": str(usage_target),
         "usage_percent": usage_percent,
         "free_gb": round(free / (1024 ** 3), 2),
     }

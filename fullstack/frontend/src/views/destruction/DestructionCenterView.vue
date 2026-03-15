@@ -14,7 +14,7 @@
           v-model:value="filters.keyword"
           allow-clear
           placeholder="按申请编号、档号、题名或申请人搜索"
-          @search="loadApplications"
+          @search="handleApplyFilters"
         />
         <a-select
           v-model:value="filters.scope"
@@ -47,7 +47,16 @@
         :data-source="applications"
         :loading="loading"
         row-key="id"
-        :pagination="{ pageSize: 8, showSizeChanger: false }"
+        :pagination="{
+          current: applicationPagination.current,
+          pageSize: applicationPagination.pageSize,
+          total: applicationPagination.total,
+          showSizeChanger: true,
+          pageSizeOptions: ['8', '20', '50'],
+          onChange: handleApplicationTableChange,
+          onShowSizeChange: handleApplicationTableChange,
+          showTotal: (total: number) => `共 ${total} 条`,
+        }"
       >
         <template #emptyText>
           <a-empty description="当前没有销毁申请记录" />
@@ -321,6 +330,7 @@ import {
   executeDestroyApplication,
   fetchDestroyApplicationDetail,
   fetchDestroyApplications,
+  fetchDestroyApplicationsPage,
   validateDestroyAttachmentFiles,
   type DestroyApplication,
   type DestroyApplicationDetail,
@@ -365,6 +375,11 @@ const approvalModalOpen = ref(false)
 const executeModalOpen = ref(false)
 const detailDrawerOpen = ref(false)
 const applications = ref<DestroyApplication[]>([])
+const applicationPagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 const archiveCandidates = ref<ArchiveRecord[]>([])
 const selectedApplication = ref<DestroyApplication | null>(null)
 const detailRecord = ref<DestroyApplicationDetail | null>(null)
@@ -424,7 +439,7 @@ const archiveOptions = computed(() =>
 )
 
 const summaryCards = computed(() => {
-  const total = applications.value.length
+  const total = applicationPagination.total
   const pending = applications.value.filter((item) => item.status === "PENDING_APPROVAL").length
   const approved = applications.value.filter((item) => item.status === "APPROVED").length
   const executed = applications.value.filter((item) => item.status === "EXECUTED").length
@@ -466,18 +481,35 @@ function handleReset() {
   filters.keyword = ""
   filters.status = undefined
   filters.scope = canManageArchives.value ? "all" : "mine"
+  applicationPagination.current = 1
+  void loadApplications()
+}
+
+function handleApplyFilters() {
+  applicationPagination.current = 1
+  void loadApplications()
+}
+
+function handleApplicationTableChange(page: number, pageSize: number) {
+  applicationPagination.current = page
+  applicationPagination.pageSize = pageSize
   void loadApplications()
 }
 
 async function loadApplications() {
   loading.value = true
   try {
-    const response = await fetchDestroyApplications({
+    const response = await fetchDestroyApplicationsPage({
       scope: filters.scope,
       keyword: filters.keyword.trim() || undefined,
       status: filters.status,
+      page: applicationPagination.current,
+      page_size: applicationPagination.pageSize,
     })
-    applications.value = response.data
+    applications.value = response.data.items
+    applicationPagination.total = response.data.pagination.total
+    applicationPagination.current = response.data.pagination.page
+    applicationPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载销毁申请列表失败。")
   } finally {

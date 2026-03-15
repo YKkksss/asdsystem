@@ -6,10 +6,12 @@ from apps.audit.api.serializers import AuditLogSerializer
 from apps.audit.models import AuditLog
 from apps.audit.services import build_audit_summary
 from apps.common.permissions import IsAuditViewer
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 
 
 class AuditLogViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
@@ -54,8 +56,7 @@ class AuditLogViewSet(
         return queryset
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object())
@@ -67,4 +68,3 @@ class AuditSummaryAPIView(APIView):
 
     def get(self, request):
         return success_response(data=build_audit_summary())
-

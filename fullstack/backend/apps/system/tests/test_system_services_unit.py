@@ -23,6 +23,7 @@ class SystemServicesUnitTests(SimpleTestCase):
 
         self.assertEqual(payload["status"], "warning")
         self.assertEqual(payload["checks"]["storage"]["status"], "warning")
+        self.assertNotIn("environment", payload)
 
     @patch(
         "apps.system.services.check_storage_health",
@@ -41,3 +42,4 @@ class SystemServicesUnitTests(SimpleTestCase):
 
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["checks"]["redis"]["status"], "error")
+        self.assertNotIn("environment", payload)

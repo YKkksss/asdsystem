@@ -2,9 +2,9 @@ name: asd-system
 
 x-backend-env: &backend-env
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-only-secret-key-for-asd-system-2026}
-  DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
-  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
-  DJANGO_CORS_ALLOW_ALL: ${DJANGO_CORS_ALLOW_ALL:-true}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-127.0.0.1,localhost,backend}
+  DJANGO_CORS_ALLOW_ALL: ${DJANGO_CORS_ALLOW_ALL:-false}
   DB_ENGINE: mysql
   DB_HOST: mysql
   DB_PORT: 3306
@@ -67,7 +67,7 @@ services:
     environment:
       <<: *backend-env
       ASD_ADMIN_USERNAME: ${ASD_ADMIN_USERNAME:-admin}
-      ASD_ADMIN_PASSWORD: ${ASD_ADMIN_PASSWORD:-Admin12345}
+      ASD_ADMIN_PASSWORD: ${ASD_ADMIN_PASSWORD:-}
       ASD_ADMIN_REAL_NAME: ${ASD_ADMIN_REAL_NAME:-系统管理员}
       ASD_ROOT_DEPT_CODE: ${ASD_ROOT_DEPT_CODE:-ROOT}
       ASD_ROOT_DEPT_NAME: ${ASD_ROOT_DEPT_NAME:-总部}

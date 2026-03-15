@@ -27,11 +27,6 @@
           />
         </a-form-item>
 
-        <div class="login-tip">
-          <strong>管理员账号：admin</strong>
-          <span>管理员密码：Admin12345</span>
-        </div>
-
         <div class="login-actions">
           <a-button :loading="submitting" block html-type="submit" size="large" type="primary">
             登录系统
@@ -148,22 +143,6 @@ async function handleSubmit() {
   padding: 24px;
   border-radius: 24px;
   background: #ffffff;
-}
-
-.login-tip {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid rgba(10, 113, 82, 0.14);
-  border-radius: 16px;
-  background: rgba(10, 113, 82, 0.06);
-}
-
-.login-tip strong,
-.login-tip span {
-  color: #0f5132;
-  line-height: 1.6;
 }
 
 .login-actions {

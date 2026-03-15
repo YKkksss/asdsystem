@@ -29,6 +29,24 @@ class ArchiveApiTests(APITestCase):
             dept_name="总部",
         )
         sync_department_hierarchy(self.department)
+        self.business_department = Department.objects.create(
+            dept_code="BUS",
+            dept_name="业务部",
+            parent=self.department,
+        )
+        sync_department_hierarchy(self.business_department)
+        self.business_child_department = Department.objects.create(
+            dept_code="BUS_CHILD",
+            dept_name="业务一部",
+            parent=self.business_department,
+        )
+        sync_department_hierarchy(self.business_child_department)
+        self.audit_department = Department.objects.create(
+            dept_code="AUD",
+            dept_name="审计部",
+            parent=self.department,
+        )
+        sync_department_hierarchy(self.audit_department)
 
         self.archivist_role = Role.objects.create(
             role_code="ARCHIVIST",
@@ -40,6 +58,12 @@ class ArchiveApiTests(APITestCase):
             role_code="BORROWER",
             role_name="借阅人",
             data_scope=DataScope.SELF,
+            status=True,
+        )
+        self.dept_and_child_role = Role.objects.create(
+            role_code="BUS_MANAGER",
+            role_name="业务主管",
+            data_scope=DataScope.DEPT_AND_CHILD,
             status=True,
         )
         self.user = User.objects.create_user(
@@ -59,6 +83,22 @@ class ArchiveApiTests(APITestCase):
             security_clearance_level=SecurityClearance.INTERNAL,
         )
         assign_roles_to_user(self.low_clearance_user, [self.borrower_role.id])
+        self.business_scope_user = User.objects.create_user(
+            username="business_reader",
+            password="BusinessReader12345",
+            real_name="业务查阅人",
+            dept=self.business_department,
+            security_clearance_level=SecurityClearance.TOP_SECRET,
+        )
+        assign_roles_to_user(self.business_scope_user, [self.borrower_role.id])
+        self.business_manager_user = User.objects.create_user(
+            username="business_manager",
+            password="BusinessManager12345",
+            real_name="业务主管",
+            dept=self.business_department,
+            security_clearance_level=SecurityClearance.TOP_SECRET,
+        )
+        assign_roles_to_user(self.business_manager_user, [self.dept_and_child_role.id])
         self.client.force_authenticate(self.user)
 
     def tearDown(self) -> None:
@@ -83,6 +123,33 @@ class ArchiveApiTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["data"]["full_location_code"], "一号库房/A区/G01/J01/L01/H01")
         return response.json()["data"]["id"]
+
+    def _create_archive_record(
+        self,
+        *,
+        archive_code: str,
+        title: str,
+        responsible_dept: Department | None = None,
+        location_id: int | None = None,
+        security_level: str = SecurityClearance.INTERNAL,
+        status: str = ArchiveStatus.ON_SHELF,
+        created_by: int | None = None,
+        responsible_person: str = "责任人甲",
+    ) -> ArchiveRecord:
+        operator_id = created_by or self.user.id
+        return ArchiveRecord.objects.create(
+            archive_code=archive_code,
+            title=title,
+            year=2026,
+            retention_period="长期",
+            security_level=security_level,
+            status=status,
+            responsible_dept=responsible_dept,
+            responsible_person=responsible_person,
+            location_id=location_id,
+            created_by=operator_id,
+            updated_by=operator_id,
+        )
 
     def test_create_archive_should_create_initial_revision(self) -> None:
         location_id = self._create_location()
@@ -610,6 +677,7 @@ class ArchiveApiTests(APITestCase):
             retention_period="长期",
             security_level=SecurityClearance.SECRET,
             status=ArchiveStatus.ON_SHELF,
+            responsible_dept_id=self.department.id,
             created_by=self.user.id,
             updated_by=self.user.id,
         )
@@ -633,3 +701,120 @@ class ArchiveApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("当前账号无权访问该档案文件", response.json()["message"])
+
+    def test_archive_list_should_apply_data_scope_for_self_role_user(self) -> None:
+        location_id = self._create_location()
+        self._create_archive_record(
+            archive_code="A2026-1001",
+            title="总部档案",
+            responsible_dept=self.department,
+            location_id=location_id,
+        )
+        self._create_archive_record(
+            archive_code="A2026-1002",
+            title="业务部档案",
+            responsible_dept=self.business_department,
+            location_id=location_id,
+        )
+
+        self.client.force_authenticate(self.business_scope_user)
+        response = self.client.get("/api/v1/archives/records/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["archive_code"] for item in response.json()["data"]], ["A2026-1002"])
+
+    def test_archive_detail_should_return_404_when_archive_is_out_of_data_scope(self) -> None:
+        archive = self._create_archive_record(
+            archive_code="A2026-1003",
+            title="总部详情档案",
+            responsible_dept=self.department,
+        )
+
+        self.client.force_authenticate(self.business_scope_user)
+        response = self.client.get(f"/api/v1/archives/records/{archive.id}/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_archive_file_tickets_should_reject_when_archive_is_out_of_data_scope(self) -> None:
+        archive = self._create_archive_record(
+            archive_code="A2026-1004",
+            title="总部预览档案",
+            responsible_dept=self.department,
+        )
+        relative_path = "archive-files/test/scope-preview.pdf"
+        absolute_path = Path(self.media_root, relative_path)
+        absolute_path.parent.mkdir(parents=True, exist_ok=True)
+        absolute_path.write_bytes(b"%PDF-1.4 scope preview sample")
+
+        archive_file = ArchiveFile.objects.create(
+            archive=archive,
+            file_name="scope-preview.pdf",
+            file_path=relative_path,
+            file_ext="pdf",
+            mime_type="application/pdf",
+            file_size=absolute_path.stat().st_size,
+            uploaded_by=self.user.id,
+        )
+
+        self.client.force_authenticate(self.business_scope_user)
+        preview_response = self.client.post(f"/api/v1/archives/files/{archive_file.id}/preview-ticket/", format="json")
+        download_response = self.client.post(
+            f"/api/v1/archives/files/{archive_file.id}/download-ticket/",
+            {"purpose": "越权测试"},
+            format="json",
+        )
+
+        self.assertEqual(preview_response.status_code, 403)
+        self.assertIn("所属范围外的档案", preview_response.json()["message"])
+        self.assertEqual(download_response.status_code, 403)
+        self.assertIn("所属范围外的档案", download_response.json()["message"])
+
+    def test_archive_list_should_include_child_departments_for_dept_and_child_scope(self) -> None:
+        self._create_archive_record(
+            archive_code="A2026-1005",
+            title="业务部直属档案",
+            responsible_dept=self.business_department,
+        )
+        self._create_archive_record(
+            archive_code="A2026-1006",
+            title="业务一部档案",
+            responsible_dept=self.business_child_department,
+        )
+        self._create_archive_record(
+            archive_code="A2026-1007",
+            title="审计部档案",
+            responsible_dept=self.audit_department,
+        )
+
+        self.client.force_authenticate(self.business_manager_user)
+        response = self.client.get("/api/v1/archives/records/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["archive_code"] for item in response.json()["data"]],
+            ["A2026-1005", "A2026-1006"],
+        )
+
+    def test_archive_list_should_support_optional_pagination(self) -> None:
+        for index in range(5):
+            self._create_archive_record(
+                archive_code=f"A2026-P{index + 1:03d}",
+                title=f"分页档案{index + 1}",
+                responsible_dept=self.department,
+            )
+
+        response = self.client.get(
+            "/api/v1/archives/records/",
+            {"page": 2, "page_size": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pagination"]["page"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["page_size"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["total"], 5)
+        self.assertEqual(response.json()["data"]["pagination"]["total_pages"], 3)
+        self.assertEqual(len(response.json()["data"]["items"]), 2)
+        self.assertEqual(
+            [item["archive_code"] for item in response.json()["data"]["items"]],
+            ["A2026-P003", "A2026-P004"],
+        )

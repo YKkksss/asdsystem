@@ -65,7 +65,16 @@
         :data-source="logs"
         :loading="loading"
         row-key="id"
-        :pagination="{ pageSize: 10, showSizeChanger: false }"
+        :pagination="{
+          current: logPagination.current,
+          pageSize: logPagination.pageSize,
+          total: logPagination.total,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50'],
+          onChange: handleLogTableChange,
+          onShowSizeChange: handleLogTableChange,
+          showTotal: (total: number) => `共 ${total} 条`,
+        }"
       >
         <template #emptyText>
           <a-empty description="暂无审计日志" />
@@ -150,7 +159,7 @@
 import { onMounted, reactive, ref } from "vue"
 import { message } from "ant-design-vue"
 
-import { fetchAuditLogs, fetchAuditSummary, type AuditLog, type AuditSummary } from "@/api/audit"
+import { fetchAuditLogsPage, fetchAuditSummary, type AuditLog, type AuditSummary } from "@/api/audit"
 
 const moduleLabelMap: Record<string, string> = {
   AUTH: "登录认证",
@@ -212,6 +221,11 @@ const columns = [
 
 const loading = ref(false)
 const logs = ref<AuditLog[]>([])
+const logPagination = reactive({
+  current: 1,
+  pageSize: 10,
+  total: 0,
+})
 const detailOpen = ref(false)
 const selectedLog = ref<AuditLog | null>(null)
 const summary = reactive<AuditSummary>({
@@ -253,6 +267,13 @@ function handleReset() {
   filters.keyword = ""
   filters.module_name = undefined
   filters.result_status = undefined
+  logPagination.current = 1
+  void loadPageData()
+}
+
+function handleLogTableChange(page: number, pageSize: number) {
+  logPagination.current = page
+  logPagination.pageSize = pageSize
   void loadPageData()
 }
 
@@ -260,14 +281,19 @@ async function loadPageData() {
   loading.value = true
   try {
     const [logsResponse, summaryResponse] = await Promise.all([
-      fetchAuditLogs({
+      fetchAuditLogsPage({
         keyword: filters.keyword.trim() || undefined,
         module_name: filters.module_name,
         result_status: filters.result_status,
+        page: logPagination.current,
+        page_size: logPagination.pageSize,
       }),
       fetchAuditSummary(),
     ])
-    logs.value = logsResponse.data
+    logs.value = logsResponse.data.items
+    logPagination.total = logsResponse.data.pagination.total
+    logPagination.current = logsResponse.data.pagination.page
+    logPagination.pageSize = logsResponse.data.pagination.page_size
     summary.total_count = summaryResponse.data.total_count
     summary.today_count = summaryResponse.data.today_count
     summary.failed_count = summaryResponse.data.failed_count

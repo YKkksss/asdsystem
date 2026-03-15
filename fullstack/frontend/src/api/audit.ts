@@ -1,4 +1,8 @@
-import http, { type ApiResponse } from "@/api/http"
+import http, {
+  type ApiResponse,
+  type PaginatedResponseData,
+  type PaginationQueryParams,
+} from "@/api/http"
 
 
 export interface AuditLog {
@@ -44,6 +48,16 @@ export interface AuditLogQueryParams {
 
 export async function fetchAuditLogs(params?: AuditLogQueryParams) {
   const response = await http.get<ApiResponse<AuditLog[]>>("/audit/logs/", { params })
+  return response.data
+}
+
+export async function fetchAuditLogsPage(params?: AuditLogQueryParams & PaginationQueryParams) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<AuditLog>>>("/audit/logs/", {
+    params: {
+      ...params,
+      paginate: true,
+    },
+  })
   return response.data
 }
 

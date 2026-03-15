@@ -101,3 +101,25 @@ class AuditApiTests(APITestCase):
         self.client.force_authenticate(self.borrower_user)
         response = self.client.get("/api/v1/audit/logs/")
         self.assertEqual(response.status_code, 403)
+
+    def test_audit_log_list_should_support_optional_pagination(self) -> None:
+        for index in range(3):
+            record_audit_log(
+                module_name="BORROWING",
+                action_code=f"BORROW_LOG_{index + 1}",
+                description=f"借阅日志{index + 1}",
+                user=self.admin_user,
+                biz_type="borrow_application",
+                biz_id=index + 10,
+                target_repr=f"B{index + 1}",
+            )
+
+        self.client.force_authenticate(self.auditor_user)
+        response = self.client.get("/api/v1/audit/logs/", {"page": 2, "page_size": 2})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pagination"]["page"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["page_size"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["total"], 5)
+        self.assertEqual(response.json()["data"]["pagination"]["total_pages"], 3)
+        self.assertEqual(len(response.json()["data"]["items"]), 2)

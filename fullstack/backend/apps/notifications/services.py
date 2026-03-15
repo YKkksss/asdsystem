@@ -1,4 +1,7 @@
 import logging
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.core.mail import send_mail
@@ -9,6 +12,14 @@ from apps.notifications.models import EmailTask, EmailTaskStatus, NotificationTy
 
 
 logger = logging.getLogger(__name__)
+
+
+LOCAL_ONLY_EMAIL_BACKENDS = {
+    "django.core.mail.backends.console.EmailBackend",
+    "django.core.mail.backends.filebased.EmailBackend",
+    "django.core.mail.backends.locmem.EmailBackend",
+    "django.core.mail.backends.dummy.EmailBackend",
+}
 
 
 @transaction.atomic
@@ -116,6 +127,98 @@ def dispatch_email_task(email_task: EmailTask) -> None:
     except Exception:
         logger.warning("Celery 邮件发送不可用，回退为同步发送", extra={"email_task_id": email_task.id})
         process_email_task(email_task.id)
+
+
+def get_email_channel_diagnostics() -> dict[str, object]:
+    backend_path = getattr(settings, "EMAIL_BACKEND", "").strip()
+    issues: list[str] = []
+
+    if not backend_path:
+        issues.append("未配置 EMAIL_BACKEND。")
+    elif backend_path in LOCAL_ONLY_EMAIL_BACKENDS:
+        issues.append("当前邮件后端仅用于本地调试，不会将邮件发送到外部邮箱。")
+
+    if backend_path == "django.core.mail.backends.smtp.EmailBackend":
+        if not getattr(settings, "EMAIL_HOST", "").strip():
+            issues.append("未配置 EMAIL_HOST。")
+        if not getattr(settings, "DEFAULT_FROM_EMAIL", "").strip():
+            issues.append("未配置 DEFAULT_FROM_EMAIL。")
+        if getattr(settings, "EMAIL_USE_TLS", False) and getattr(settings, "EMAIL_USE_SSL", False):
+            issues.append("EMAIL_USE_TLS 与 EMAIL_USE_SSL 不能同时启用。")
+
+    return {
+        "backend": backend_path,
+        "is_external_ready": not issues,
+        "issues": issues,
+    }
+
+
+def send_verification_email(*, receiver_email: str, subject: str, content: str) -> EmailTask:
+    diagnostics = get_email_channel_diagnostics()
+    if not diagnostics["is_external_ready"]:
+        raise ValueError("；".join(diagnostics["issues"]))
+
+    email_task = create_email_task(
+        receiver_user=None,
+        receiver_email=receiver_email,
+        subject=subject,
+        content=content,
+        biz_type="notification_channel_verification",
+    )
+    process_email_task(email_task.id)
+    email_task.refresh_from_db()
+
+    if email_task.send_status != EmailTaskStatus.SUCCESS:
+        raise RuntimeError(email_task.error_message or "邮件验证发送失败。")
+
+    return email_task
+
+
+def send_verification_webhook(
+    *,
+    webhook_url: str,
+    subject: str,
+    content: str,
+    timeout: int = 5,
+    headers: dict[str, str] | None = None,
+) -> dict[str, object]:
+    payload = {
+        "title": subject,
+        "message": content,
+        "event": "notification_channel_verification",
+        "sent_at": timezone.now().isoformat(),
+    }
+    request_headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "ASDSystem-Notification-Verification/1.0",
+    }
+    if headers:
+        request_headers.update(headers)
+
+    request = Request(
+        webhook_url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=request_headers,
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            status_code = response.getcode() or 200
+            response_text = response.read().decode("utf-8", errors="replace")
+    except HTTPError as exc:
+        response_text = exc.read().decode("utf-8", errors="replace")
+        logger.exception("Webhook 验证发送失败", extra={"webhook_url": webhook_url, "status_code": exc.code})
+        raise RuntimeError(f"Webhook 返回异常状态 {exc.code}：{response_text or exc.reason}") from exc
+    except URLError as exc:
+        logger.exception("Webhook 验证发送失败", extra={"webhook_url": webhook_url})
+        raise RuntimeError(f"Webhook 请求失败：{exc.reason}") from exc
+
+    logger.info("Webhook 验证发送成功", extra={"webhook_url": webhook_url, "status_code": status_code})
+    return {
+        "status_code": status_code,
+        "response_text": response_text,
+    }
 
 
 @transaction.atomic

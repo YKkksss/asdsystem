@@ -14,9 +14,9 @@
           v-model:value="keyword"
           allow-clear
           placeholder="按申请编号、档号、题名或申请人搜索"
-          @search="loadApplications"
+          @search="handleApplyFilters"
         />
-        <a-button type="primary" @click="loadApplications">刷新审批列表</a-button>
+        <a-button type="primary" @click="handleApplyFilters">刷新审批列表</a-button>
       </div>
 
       <a-table
@@ -24,7 +24,16 @@
         :data-source="applications"
         :loading="loading"
         row-key="id"
-        :pagination="{ pageSize: 8, showSizeChanger: false }"
+        :pagination="{
+          current: applicationPagination.current,
+          pageSize: applicationPagination.pageSize,
+          total: applicationPagination.total,
+          showSizeChanger: true,
+          pageSizeOptions: ['8', '20', '50'],
+          onChange: handleApplicationTableChange,
+          onShowSizeChange: handleApplicationTableChange,
+          showTotal: (total: number) => `共 ${total} 条`,
+        }"
       >
         <template #emptyText>
           <a-empty description="当前没有待审批借阅申请" />
@@ -99,7 +108,7 @@ import { message } from "ant-design-vue"
 
 import {
   approveBorrowApplication,
-  fetchBorrowApplications,
+  fetchBorrowApplicationsPage,
   type BorrowApplication,
 } from "@/api/borrowing"
 import { getRequestErrorMessage, getRequestErrorStatus } from "@/utils/request"
@@ -121,6 +130,11 @@ const submitting = ref(false)
 const modalOpen = ref(false)
 const keyword = ref("")
 const applications = ref<BorrowApplication[]>([])
+const applicationPagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 const selectedApplication = ref<BorrowApplication | null>(null)
 const pendingAction = ref<"APPROVE" | "REJECT">("APPROVE")
 const actionForm = reactive({
@@ -128,11 +142,11 @@ const actionForm = reactive({
 })
 
 const summaryCards = computed(() => {
-  const total = applications.value.length
+  const total = applicationPagination.total
   const urgent = applications.value.filter((item) => item.is_overdue).length
   return [
-    { label: "待审批数量", value: total, caption: "当前由我处理的借阅审批单数" },
-    { label: "涉及超期", value: urgent, caption: "申请人已有超期标记的单据数量" },
+    { label: "待审批数量", value: total, caption: "当前筛选条件下由我处理的借阅审批单数" },
+    { label: "涉及超期", value: urgent, caption: "当前页中申请人已有超期标记的单据数量" },
   ]
 })
 
@@ -147,6 +161,17 @@ function resetModal() {
   actionForm.opinion = ""
 }
 
+function handleApplyFilters() {
+  applicationPagination.current = 1
+  void loadApplications()
+}
+
+function handleApplicationTableChange(page: number, pageSize: number) {
+  applicationPagination.current = page
+  applicationPagination.pageSize = pageSize
+  void loadApplications()
+}
+
 function openActionModal(application: BorrowApplication, action: "APPROVE" | "REJECT") {
   selectedApplication.value = application
   pendingAction.value = action
@@ -157,11 +182,16 @@ function openActionModal(application: BorrowApplication, action: "APPROVE" | "RE
 async function loadApplications() {
   loading.value = true
   try {
-    const response = await fetchBorrowApplications({
+    const response = await fetchBorrowApplicationsPage({
       scope: "approval",
       keyword: keyword.value.trim() || undefined,
+      page: applicationPagination.current,
+      page_size: applicationPagination.pageSize,
     })
-    applications.value = response.data
+    applications.value = response.data.items
+    applicationPagination.total = response.data.pagination.total
+    applicationPagination.current = response.data.pagination.page
+    applicationPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载待审批借阅申请失败。")
   } finally {

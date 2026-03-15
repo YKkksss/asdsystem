@@ -4,6 +4,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 
 from apps.common.permissions import IsArchiveManager, IsSystemAdmin
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.destruction.api.serializers import (
     DestroyApplicationDetailSerializer,
@@ -17,26 +18,18 @@ from apps.destruction.services import is_admin_or_auditor_user, is_archive_manag
 
 
 class DestroyApplicationViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = (
-        DestroyApplication.objects.select_related(
-            "archive",
-            "applicant",
-            "applicant_dept",
-            "current_approver",
-            "execution_record",
-            "execution_record__operator",
-        )
-        .prefetch_related(
-            "approval_records__approver",
-            "execution_record__attachments",
-        )
-        .order_by("-id")
-    )
+    queryset = DestroyApplication.objects.select_related(
+        "archive",
+        "applicant",
+        "applicant_dept",
+        "current_approver",
+    ).order_by("-id")
     search_fields = ["application_no", "reason", "basis", "archive__archive_code", "archive__title", "applicant__real_name"]
     ordering_fields = ["id", "created_at", "submitted_at", "approved_at", "executed_at"]
     filterset_fields = ["status", "archive_id", "applicant_id", "applicant_dept_id", "current_approver_id"]
@@ -106,11 +99,19 @@ class DestroyApplicationViewSet(
         if archive_code:
             queryset = queryset.filter(archive__archive_code__icontains=archive_code)
 
+        if self.action == "retrieve":
+            queryset = queryset.select_related(
+                "execution_record",
+                "execution_record__operator",
+            ).prefetch_related(
+                "approval_records__approver",
+                "execution_record__attachments",
+            )
+
         return queryset.distinct()
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True, context=self.get_serializer_context())
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object(), context=self.get_serializer_context())
@@ -161,4 +162,3 @@ class DestroyApplicationViewSet(
             data=DestroyApplicationDetailSerializer(application, context=self.get_serializer_context()).data,
             message="销毁执行完成",
         )
-

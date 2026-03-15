@@ -22,9 +22,9 @@
             v-model:value="keyword"
             allow-clear
             placeholder="按申请编号、档号、题名或申请人搜索"
-            @search="loadApplications"
+            @search="handleApplyFilters"
           />
-          <a-button type="primary" @click="loadApplications">刷新待出库列表</a-button>
+          <a-button type="primary" @click="handleApplyFilters">刷新待出库列表</a-button>
         </div>
 
         <a-table
@@ -32,7 +32,16 @@
           :data-source="applications"
           :loading="loading"
           row-key="id"
-          :pagination="{ pageSize: 8, showSizeChanger: false }"
+          :pagination="{
+            current: applicationPagination.current,
+            pageSize: applicationPagination.pageSize,
+            total: applicationPagination.total,
+            showSizeChanger: true,
+            pageSizeOptions: ['8', '20', '50'],
+            onChange: handleApplicationTableChange,
+            onShowSizeChange: handleApplicationTableChange,
+            showTotal: (total: number) => `共 ${total} 条`,
+          }"
         >
           <template #emptyText>
             <a-empty description="暂无待出库借阅申请" />
@@ -96,7 +105,7 @@ import { message } from "ant-design-vue"
 
 import {
   checkoutBorrowApplication,
-  fetchBorrowApplications,
+  fetchBorrowApplicationsPage,
   type BorrowApplication,
 } from "@/api/borrowing"
 import { useAuthStore } from "@/stores/auth"
@@ -122,14 +131,23 @@ const modalOpen = ref(false)
 const keyword = ref("")
 const checkoutNote = ref("")
 const applications = ref<BorrowApplication[]>([])
+const applicationPagination = ref({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 const selectedApplication = ref<BorrowApplication | null>(null)
 
 const summaryCards = computed(() => [
-  { label: "待出库数量", value: applications.value.length, caption: "审批通过后待档案员处理的申请单数" },
+  {
+    label: "待出库数量",
+    value: applicationPagination.value.total,
+    caption: "当前筛选条件下审批通过后待档案员处理的申请单数",
+  },
   {
     label: "今日待办",
     value: applications.value.filter((item) => item.created_at.slice(0, 10) === new Date().toISOString().slice(0, 10)).length,
-    caption: "今日新进入出库环节的申请数量",
+    caption: "当前页中今日新进入出库环节的申请数量",
   },
 ])
 
@@ -146,19 +164,36 @@ function openCheckoutModal(application: BorrowApplication) {
   modalOpen.value = true
 }
 
+function handleApplyFilters() {
+  applicationPagination.value.current = 1
+  void loadApplications()
+}
+
+function handleApplicationTableChange(page: number, pageSize: number) {
+  applicationPagination.value.current = page
+  applicationPagination.value.pageSize = pageSize
+  void loadApplications()
+}
+
 async function loadApplications() {
   if (!canManageArchives.value) {
     applications.value = []
+    applicationPagination.value.total = 0
     return
   }
 
   loading.value = true
   try {
-    const response = await fetchBorrowApplications({
+    const response = await fetchBorrowApplicationsPage({
       scope: "checkout",
       keyword: keyword.value.trim() || undefined,
+      page: applicationPagination.value.current,
+      page_size: applicationPagination.value.pageSize,
     })
-    applications.value = response.data
+    applications.value = response.data.items
+    applicationPagination.value.total = response.data.pagination.total
+    applicationPagination.value.current = response.data.pagination.page
+    applicationPagination.value.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载待出库借阅申请失败。")
   } finally {

@@ -22,6 +22,7 @@ from apps.archives.api.serializers import (
 from apps.archives.models import ArchiveFile, ArchiveRecord, ArchiveStorageLocation
 from apps.archives.services import (
     batch_print_archive_codes,
+    filter_archive_queryset_by_user_scope,
     generate_archive_codes,
     issue_archive_file_download_ticket_for_user,
     issue_archive_file_preview_ticket_for_user,
@@ -30,10 +31,12 @@ from apps.archives.services import (
 from apps.audit.models import ArchiveFileAccessAction
 from apps.audit.services import mark_archive_file_access_ticket_used, record_audit_log, validate_archive_file_access_ticket
 from apps.common.permissions import IsArchiveManager
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import error_response, success_response
 
 
 class ArchiveStorageLocationViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -58,8 +61,7 @@ class ArchiveStorageLocationViewSet(
         return [permission() for permission in permission_classes]
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object())
@@ -84,17 +86,14 @@ class ArchiveStorageLocationViewSet(
 
 
 class ArchiveRecordViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     mixins.UpdateModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = (
-        ArchiveRecord.objects.select_related("responsible_dept", "location")
-        .prefetch_related("barcodes", "revisions", "files")
-        .order_by("id")
-    )
+    queryset = ArchiveRecord.objects.select_related("responsible_dept", "location").order_by("id")
     search_fields = ["archive_code", "title", "keywords", "responsible_person"]
     ordering_fields = ["id", "created_at", "updated_at", "year"]
     filterset_fields = ["status", "year", "retention_period", "security_level", "responsible_dept", "location"]
@@ -142,6 +141,10 @@ class ArchiveRecordViewSet(
         if location_id:
             queryset = queryset.filter(location_id=location_id)
 
+        if self.action == "retrieve":
+            queryset = queryset.prefetch_related("barcodes", "revisions", "files")
+
+        queryset = filter_archive_queryset_by_user_scope(queryset, self.request.user)
         return queryset.distinct()
 
     def get_permissions(self):
@@ -159,8 +162,7 @@ class ArchiveRecordViewSet(
         return ArchiveRecordListSerializer
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object())
@@ -249,7 +251,7 @@ class ArchiveFilePreviewTicketAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, file_id: int):
-        archive_file = ArchiveFile.objects.select_related("archive").filter(id=file_id).first()
+        archive_file = ArchiveFile.objects.select_related("archive", "archive__responsible_dept").filter(id=file_id).first()
         if not archive_file:
             return error_response("档案文件不存在。", status.HTTP_404_NOT_FOUND)
 
@@ -279,7 +281,7 @@ class ArchiveFileDownloadTicketAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, file_id: int):
-        archive_file = ArchiveFile.objects.select_related("archive").filter(id=file_id).first()
+        archive_file = ArchiveFile.objects.select_related("archive", "archive__responsible_dept").filter(id=file_id).first()
         if not archive_file:
             return error_response("档案文件不存在。", status.HTTP_404_NOT_FOUND)
 

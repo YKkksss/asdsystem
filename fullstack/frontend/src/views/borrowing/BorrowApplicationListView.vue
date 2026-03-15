@@ -16,7 +16,7 @@
               v-model:value="filters.keyword"
               allow-clear
               placeholder="按申请编号、档号、题名或用途搜索"
-              @search="loadApplications"
+              @search="handleApplyFilters"
             />
 
             <a-select
@@ -47,7 +47,16 @@
             :data-source="applications"
             :loading="loading"
             row-key="id"
-            :pagination="{ pageSize: 8, showSizeChanger: false }"
+            :pagination="{
+              current: applicationPagination.current,
+              pageSize: applicationPagination.pageSize,
+              total: applicationPagination.total,
+              showSizeChanger: true,
+              pageSizeOptions: ['8', '20', '50'],
+              onChange: handleApplicationTableChange,
+              onShowSizeChange: handleApplicationTableChange,
+              showTotal: (total: number) => `共 ${total} 条`,
+            }"
           >
             <template #emptyText>
               <a-empty description="暂无借阅申请记录" />
@@ -247,6 +256,7 @@ import {
   createBorrowApplication,
   fetchBorrowApplicationDetail,
   fetchBorrowApplications,
+  fetchBorrowApplicationsPage,
   type BorrowApplication,
   type BorrowApplicationDetail,
 } from "@/api/borrowing"
@@ -297,6 +307,11 @@ const detailOpen = ref(false)
 const applications = ref<BorrowApplication[]>([])
 const selectedApplication = ref<BorrowApplicationDetail | null>(null)
 const archiveOptions = ref<SelectProps["options"]>([])
+const applicationPagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 
 const requiredRules = [{ required: true, message: "该字段不能为空。" }]
 const columns = [
@@ -330,7 +345,7 @@ const initialFormState = () => ({
 const formState = reactive(initialFormState())
 
 const summaryCards = computed(() => {
-  const total = applications.value.length
+  const total = applicationPagination.total
   const pending = applications.value.filter((item) => item.status === "PENDING_APPROVAL").length
   const checkedOut = applications.value.filter((item) => ["CHECKED_OUT", "OVERDUE"].includes(item.status)).length
   const returned = applications.value.filter((item) => item.status === "RETURNED").length
@@ -361,6 +376,18 @@ function handleResetFilters() {
   filters.keyword = ""
   filters.status = undefined
   filters.scope = "mine"
+  applicationPagination.current = 1
+  void loadApplications()
+}
+
+function handleApplyFilters() {
+  applicationPagination.current = 1
+  void loadApplications()
+}
+
+function handleApplicationTableChange(page: number, pageSize: number) {
+  applicationPagination.current = page
+  applicationPagination.pageSize = pageSize
   void loadApplications()
 }
 
@@ -382,12 +409,17 @@ async function loadArchiveOptions() {
 async function loadApplications() {
   loading.value = true
   try {
-    const response = await fetchBorrowApplications({
+    const response = await fetchBorrowApplicationsPage({
       scope: canViewAllApplications.value ? filters.scope : "mine",
       keyword: filters.keyword.trim() || undefined,
       status: filters.status,
+      page: applicationPagination.current,
+      page_size: applicationPagination.pageSize,
     })
-    applications.value = response.data
+    applications.value = response.data.items
+    applicationPagination.total = response.data.pagination.total
+    applicationPagination.current = response.data.pagination.page
+    applicationPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载借阅申请失败。")
   } finally {

@@ -2,6 +2,7 @@ from rest_framework import decorators, mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.notifications.api.serializers import (
     MarkAllNotificationsReadSerializer,
@@ -13,6 +14,7 @@ from apps.notifications.services import build_notification_summary
 
 
 class SystemNotificationViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
@@ -33,8 +35,7 @@ class SystemNotificationViewSet(
         return queryset
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object())

@@ -23,30 +23,25 @@ from apps.borrowing.services import (
 )
 from apps.audit.services import record_audit_log
 from apps.common.permissions import IsArchiveManager
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.notifications.models import SystemNotification
 
 
 class BorrowApplicationViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = (
-        BorrowApplication.objects.select_related(
-            "archive",
-            "applicant",
-            "applicant_dept",
-            "current_approver",
-            "return_record",
-        )
-        .prefetch_related(
-            "approval_records__approver",
-            "return_record__attachments",
-        )
-        .order_by("-id")
-    )
+    queryset = BorrowApplication.objects.select_related(
+        "archive",
+        "applicant",
+        "applicant_dept",
+        "current_approver",
+        "return_record",
+    ).order_by("-id")
     search_fields = ["application_no", "purpose", "archive__archive_code", "archive__title", "applicant__real_name"]
     ordering_fields = ["id", "created_at", "expected_return_at", "submitted_at", "approved_at", "checkout_at", "returned_at"]
     filterset_fields = ["status", "archive_id", "applicant_id", "applicant_dept_id", "current_approver_id", "is_overdue"]
@@ -123,11 +118,26 @@ class BorrowApplicationViewSet(
         if status_value:
             queryset = queryset.filter(status=status_value)
 
+        status_in_values = [item.strip() for item in (params.get("status_in") or "").split(",") if item.strip()]
+        if status_in_values:
+            queryset = queryset.filter(status__in=status_in_values)
+
+        if self.action == "retrieve":
+            queryset = queryset.select_related(
+                "return_record__returned_by_user",
+                "return_record__received_by_user",
+                "return_record__location_after_return",
+                "checkout_record__borrower",
+                "checkout_record__operator",
+            ).prefetch_related(
+                "approval_records__approver",
+                "return_record__attachments",
+            )
+
         return queryset.distinct()
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True, context=self.get_serializer_context())
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object(), context=self.get_serializer_context())

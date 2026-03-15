@@ -21,7 +21,16 @@
               :data-source="tasks"
               :loading="loading"
               row-key="id"
-              :pagination="{ pageSize: 8, showSizeChanger: false }"
+              :pagination="{
+                current: taskPagination.current,
+                pageSize: taskPagination.pageSize,
+                total: taskPagination.total,
+                showSizeChanger: true,
+                pageSizeOptions: ['8', '20', '50'],
+                onChange: handleTaskTableChange,
+                onShowSizeChange: handleTaskTableChange,
+                showTotal: (total: number) => `共 ${total} 条`,
+              }"
             >
               <template #emptyText>
                 <a-empty description="暂无扫描任务" />
@@ -129,6 +138,7 @@ import {
   createScanTask,
   fetchScanTaskAssignees,
   fetchScanTasks,
+  fetchScanTasksPage,
   type ScanTask,
 } from "@/api/digitization"
 import { useAuthStore } from "@/stores/auth"
@@ -158,6 +168,11 @@ const loading = ref(false)
 const optionsLoading = ref(false)
 const submitting = ref(false)
 const tasks = ref<ScanTask[]>([])
+const taskPagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 const assigneeOptions = ref<SelectProps["options"]>([])
 const archiveOptions = ref<SelectProps["options"]>([])
 
@@ -183,7 +198,7 @@ const initialState = () => ({
 const formState = reactive(initialState())
 
 const summaryCards = computed(() => {
-  const total = tasks.value.length
+  const total = taskPagination.total
   const inProgress = tasks.value.filter((item) => item.status === "IN_PROGRESS").length
   const completed = tasks.value.filter((item) => item.status === "COMPLETED").length
   const failed = tasks.value.filter((item) => item.status === "FAILED").length
@@ -203,11 +218,23 @@ function handleReset() {
   Object.assign(formState, initialState())
 }
 
+function handleTaskTableChange(page: number, pageSize: number) {
+  taskPagination.current = page
+  taskPagination.pageSize = pageSize
+  void loadTasks()
+}
+
 async function loadTasks() {
   loading.value = true
   try {
-    const response = await fetchScanTasks()
-    tasks.value = response.data
+    const response = await fetchScanTasksPage({
+      page: taskPagination.current,
+      page_size: taskPagination.pageSize,
+    })
+    tasks.value = response.data.items
+    taskPagination.total = response.data.pagination.total
+    taskPagination.current = response.data.pagination.page
+    taskPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载扫描任务失败。")
   } finally {

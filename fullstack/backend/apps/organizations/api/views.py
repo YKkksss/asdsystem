@@ -2,6 +2,7 @@ from rest_framework import decorators, mixins, status, viewsets
 from rest_framework.permissions import IsAuthenticated
 
 from apps.common.permissions import IsSystemAdmin
+from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.organizations.api.serializers import DepartmentSerializer
 from apps.organizations.models import Department
@@ -9,6 +10,7 @@ from apps.organizations.services import build_department_tree
 
 
 class DepartmentViewSet(
+    OptionalPaginationListMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -28,8 +30,7 @@ class DepartmentViewSet(
         return [permission() for permission in permission_classes]
 
     def list(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.filter_queryset(self.get_queryset()), many=True)
-        return success_response(data=serializer.data)
+        return self.build_list_response()
 
     def retrieve(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object())

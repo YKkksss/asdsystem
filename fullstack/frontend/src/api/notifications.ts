@@ -1,4 +1,8 @@
-import http, { type ApiResponse } from "@/api/http"
+import http, {
+  type ApiResponse,
+  type PaginatedResponseData,
+  type PaginationQueryParams,
+} from "@/api/http"
 
 
 export interface SystemNotification {
@@ -27,6 +31,19 @@ export interface NotificationQueryParams {
 
 export async function fetchNotifications(params?: NotificationQueryParams) {
   const response = await http.get<ApiResponse<SystemNotification[]>>("/notifications/messages/", { params })
+  return response.data
+}
+
+export async function fetchNotificationsPage(params?: NotificationQueryParams & PaginationQueryParams) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<SystemNotification>>>(
+    "/notifications/messages/",
+    {
+      params: {
+        ...params,
+        paginate: true,
+      },
+    },
+  )
   return response.data
 }
 

@@ -1,4 +1,8 @@
-import http, { type ApiResponse } from "@/api/http"
+import http, {
+  type ApiResponse,
+  type PaginatedResponseData,
+  type PaginationQueryParams,
+} from "@/api/http"
 import { archiveUploadMaxSizeMb, buildUploadAccept, validateUploadFiles } from "@/utils/upload"
 
 export const scanUploadAllowedExtensions = ["pdf", "jpg", "jpeg", "png", "tif", "tiff"] as const
@@ -86,6 +90,19 @@ export interface ScanTaskAssignee {
 
 export async function fetchScanTasks() {
   const response = await http.get<ApiResponse<ScanTask[]>>("/digitization/scan-tasks/")
+  return response.data
+}
+
+export async function fetchScanTasksPage(params?: PaginationQueryParams) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<ScanTask>>>(
+    "/digitization/scan-tasks/",
+    {
+      params: {
+        ...params,
+        paginate: true,
+      },
+    },
+  )
   return response.data
 }
 

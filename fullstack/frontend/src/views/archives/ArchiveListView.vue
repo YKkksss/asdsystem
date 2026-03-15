@@ -15,7 +15,7 @@
           allow-clear
           class="toolbar-search"
           placeholder="按档号、题名、关键词、摘要或提取文本搜索"
-          @search="loadArchives"
+          @search="handleApplyFilters"
         />
 
         <a-input
@@ -83,7 +83,7 @@
       <div class="toolbar-actions">
         <a-space wrap>
           <a-button @click="handleResetFilters">重置筛选</a-button>
-          <a-button type="primary" @click="loadArchives">执行检索</a-button>
+          <a-button type="primary" @click="handleApplyFilters">执行检索</a-button>
           <a-button @click="loadArchives">刷新</a-button>
         </a-space>
 
@@ -104,7 +104,16 @@
         :loading="loading"
         row-key="id"
         :row-selection="rowSelection"
-        :pagination="{ pageSize: 8, showSizeChanger: false }"
+        :pagination="{
+          current: archivePagination.current,
+          pageSize: archivePagination.pageSize,
+          total: archivePagination.total,
+          showSizeChanger: true,
+          pageSizeOptions: ['8', '20', '50'],
+          onChange: handleArchiveTableChange,
+          onShowSizeChange: handleArchiveTableChange,
+          showTotal: (total: number) => `共 ${total} 条`,
+        }"
       >
         <template #emptyText>
           <a-empty description="暂无匹配的档案记录" />
@@ -411,6 +420,7 @@ import {
   fetchArchiveDetail,
   fetchArchiveLocations,
   fetchArchives,
+  fetchArchivesPage,
   generateArchiveCodes,
   transitionArchiveStatus,
   type ArchiveFile,
@@ -510,6 +520,11 @@ const previewTitle = ref("")
 const previewWatermarkText = ref("")
 const previewFileExt = ref("")
 const downloadPurpose = ref("")
+const archivePagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 
 const initialFilters = () => ({
   keyword: "",
@@ -531,7 +546,7 @@ const transitionForm = reactive({
 })
 
 const summaryCards = computed(() => {
-  const total = archives.value.length
+  const total = archivePagination.total
   const maskedCount = archives.value.filter((item) => item.is_sensitive_masked).length
   const onShelfCount = archives.value.filter((item) => item.status === "ON_SHELF").length
   const pendingCount = archives.value.filter((item) =>
@@ -631,6 +646,18 @@ function resetDownloadState() {
 function handleResetFilters() {
   Object.assign(filters, initialFilters())
   selectedArchiveIds.value = []
+  archivePagination.current = 1
+  void loadArchives()
+}
+
+function handleApplyFilters() {
+  archivePagination.current = 1
+  void loadArchives()
+}
+
+function handleArchiveTableChange(page: number, pageSize: number) {
+  archivePagination.current = page
+  archivePagination.pageSize = pageSize
   void loadArchives()
 }
 
@@ -659,7 +686,7 @@ async function loadFilterOptions() {
 async function loadArchives() {
   loading.value = true
   try {
-    const response = await fetchArchives({
+    const response = await fetchArchivesPage({
       keyword: filters.keyword || undefined,
       archive_code: filters.archive_code || undefined,
       year: filters.year || undefined,
@@ -668,10 +695,15 @@ async function loadArchives() {
       status: filters.status || undefined,
       responsible_dept_id: filters.responsible_dept_id || undefined,
       location_id: canManageArchives.value ? filters.location_id || undefined : undefined,
+      page: archivePagination.current,
+      page_size: archivePagination.pageSize,
     })
-    archives.value = response.data
+    archives.value = response.data.items
+    archivePagination.total = response.data.pagination.total
+    archivePagination.current = response.data.pagination.page
+    archivePagination.pageSize = response.data.pagination.page_size
     selectedArchiveIds.value = selectedArchiveIds.value.filter((archiveId) =>
-      response.data.some((archive) => archive.id === archiveId),
+      response.data.items.some((archive) => archive.id === archiveId),
     )
   } catch (error) {
     handleRequestError(error, "加载档案检索结果失败。")

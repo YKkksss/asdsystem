@@ -15,10 +15,19 @@
 
           <a-table
             :columns="myColumns"
-            :data-source="activeBorrowedApplications"
+            :data-source="myApplications"
             :loading="myLoading"
             row-key="id"
-            :pagination="{ pageSize: 6, showSizeChanger: false }"
+            :pagination="{
+              current: myPagination.current,
+              pageSize: myPagination.pageSize,
+              total: myPagination.total,
+              showSizeChanger: true,
+              pageSizeOptions: ['6', '20', '50'],
+              onChange: handleMyTableChange,
+              onShowSizeChange: handleMyTableChange,
+              showTotal: (total: number) => `共 ${total} 条`,
+            }"
           >
             <template #emptyText>
               <a-empty description="当前没有待归还借阅档案" />
@@ -59,7 +68,16 @@
             :data-source="pendingConfirmApplications"
             :loading="confirmLoading"
             row-key="id"
-            :pagination="{ pageSize: 6, showSizeChanger: false }"
+            :pagination="{
+              current: confirmPagination.current,
+              pageSize: confirmPagination.pageSize,
+              total: confirmPagination.total,
+              showSizeChanger: true,
+              pageSizeOptions: ['6', '20', '50'],
+              onChange: handleConfirmTableChange,
+              onShowSizeChange: handleConfirmTableChange,
+              showTotal: (total: number) => `共 ${total} 条`,
+            }"
           >
             <template #emptyText>
               <a-empty description="当前没有待确认归还记录" />
@@ -233,7 +251,7 @@ import {
   borrowReturnAttachmentMaxSizeMb,
   confirmBorrowReturn,
   fetchBorrowApplicationDetail,
-  fetchBorrowApplications,
+  fetchBorrowApplicationsPage,
   submitBorrowReturn,
   validateBorrowReturnAttachmentFiles,
   type BorrowApplication,
@@ -290,6 +308,16 @@ const confirmDetailLoading = ref(false)
 const myApplications = ref<BorrowApplication[]>([])
 const pendingConfirmApplications = ref<BorrowApplication[]>([])
 const locationOptions = ref<SelectProps["options"]>([])
+const myPagination = reactive({
+  current: 1,
+  pageSize: 6,
+  total: 0,
+})
+const confirmPagination = reactive({
+  current: 1,
+  pageSize: 6,
+  total: 0,
+})
 
 const returnModalOpen = ref(false)
 const confirmModalOpen = ref(false)
@@ -310,25 +338,21 @@ const confirmForm = reactive({
   confirm_note: "",
 })
 
-const activeBorrowedApplications = computed(() =>
-  myApplications.value.filter((item) => ["CHECKED_OUT", "OVERDUE"].includes(item.status)),
-)
-
 const summaryCards = computed(() => [
   {
     label: "待归还",
-    value: activeBorrowedApplications.value.length,
-    caption: "当前账号仍需提交归还的借阅申请数量",
+    value: myPagination.total,
+    caption: "当前账号仍需提交归还的借阅申请总数量",
   },
   {
     label: "超期中",
-    value: activeBorrowedApplications.value.filter((item) => item.status === "OVERDUE").length,
-    caption: "已经超过预计归还时间的申请数量",
+    value: myApplications.value.filter((item) => item.status === "OVERDUE").length,
+    caption: "当前页中已经超过预计归还时间的申请数量",
   },
   {
     label: "待确认",
-    value: pendingConfirmApplications.value.length,
-    caption: "等待档案员验收确认的归还记录数量",
+    value: confirmPagination.total,
+    caption: "等待档案员验收确认的归还记录总数量",
   },
 ])
 
@@ -388,6 +412,18 @@ function openReturnModal(application: BorrowApplication) {
   returnModalOpen.value = true
 }
 
+function handleMyTableChange(page: number, pageSize: number) {
+  myPagination.current = page
+  myPagination.pageSize = pageSize
+  void loadMyApplications()
+}
+
+function handleConfirmTableChange(page: number, pageSize: number) {
+  confirmPagination.current = page
+  confirmPagination.pageSize = pageSize
+  void loadPendingConfirmApplications()
+}
+
 async function openConfirmModal(application: BorrowApplication) {
   confirmModalOpen.value = true
   confirmDetailLoading.value = true
@@ -418,8 +454,16 @@ async function openConfirmModal(application: BorrowApplication) {
 async function loadMyApplications() {
   myLoading.value = true
   try {
-    const response = await fetchBorrowApplications({ scope: "mine" })
-    myApplications.value = response.data
+    const response = await fetchBorrowApplicationsPage({
+      scope: "mine",
+      status_in: "CHECKED_OUT,OVERDUE",
+      page: myPagination.current,
+      page_size: myPagination.pageSize,
+    })
+    myApplications.value = response.data.items
+    myPagination.total = response.data.pagination.total
+    myPagination.current = response.data.pagination.page
+    myPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载我的借阅申请失败。")
   } finally {
@@ -430,13 +474,21 @@ async function loadMyApplications() {
 async function loadPendingConfirmApplications() {
   if (!canManageArchives.value) {
     pendingConfirmApplications.value = []
+    confirmPagination.total = 0
     return
   }
 
   confirmLoading.value = true
   try {
-    const response = await fetchBorrowApplications({ scope: "return" })
-    pendingConfirmApplications.value = response.data
+    const response = await fetchBorrowApplicationsPage({
+      scope: "return",
+      page: confirmPagination.current,
+      page_size: confirmPagination.pageSize,
+    })
+    pendingConfirmApplications.value = response.data.items
+    confirmPagination.total = response.data.pagination.total
+    confirmPagination.current = response.data.pagination.page
+    confirmPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载待确认归还记录失败。")
   } finally {

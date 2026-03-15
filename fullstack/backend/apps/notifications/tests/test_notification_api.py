@@ -328,3 +328,21 @@ class NotificationApiTests(APITestCase):
         borrow_detail_response = self.client.get(f"/api/v1/borrowing/applications/{application_id}/")
         self.assertEqual(borrow_detail_response.status_code, 200)
         self.assertEqual(borrow_detail_response.json()["data"]["id"], application_id)
+
+    def test_notification_list_should_support_optional_pagination(self) -> None:
+        for index in range(5):
+            self.create_notification(
+                user=self.borrower_user,
+                title=f"分页通知{index + 1}",
+                notification_type=NotificationType.SYSTEM,
+            )
+
+        self.client.force_authenticate(self.borrower_user)
+        response = self.client.get("/api/v1/notifications/messages/", {"page": 2, "page_size": 2})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pagination"]["page"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["page_size"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["total"], 5)
+        self.assertEqual(response.json()["data"]["pagination"]["total_pages"], 3)
+        self.assertEqual(len(response.json()["data"]["items"]), 2)

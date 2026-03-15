@@ -439,3 +439,56 @@ class BorrowingApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["message"], "归还时至少需要上传照片或交接单中的一种。")
+
+    def test_borrow_application_list_should_support_optional_pagination_and_status_in_filter(self) -> None:
+        expected_return_at = (timezone.now() + timedelta(days=5)).isoformat()
+
+        for index in range(3):
+            archive = self.create_archive(
+                archive_code=f"A2026-L{index + 1:03d}",
+                security_level=SecurityClearance.INTERNAL,
+            )
+            self.client.force_authenticate(self.borrower_user)
+            create_response = self.client.post(
+                "/api/v1/borrowing/applications/",
+                {
+                    "archive_id": archive.id,
+                    "purpose": f"分页申请{index + 1}",
+                    "expected_return_at": expected_return_at,
+                },
+                format="json",
+            )
+            application_id = create_response.json()["data"]["id"]
+
+            self.client.force_authenticate(self.approver_user)
+            self.client.post(
+                f"/api/v1/borrowing/applications/{application_id}/approve/",
+                {"action": "APPROVE", "opinion": "通过"},
+                format="json",
+            )
+
+            self.client.force_authenticate(self.archivist_user)
+            self.client.post(
+                f"/api/v1/borrowing/applications/{application_id}/checkout/",
+                {"checkout_note": "已出库"},
+                format="json",
+            )
+
+        self.client.force_authenticate(self.borrower_user)
+        response = self.client.get(
+            "/api/v1/borrowing/applications/",
+            {
+                "scope": "mine",
+                "status_in": "CHECKED_OUT,OVERDUE",
+                "page": 2,
+                "page_size": 2,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pagination"]["page"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["page_size"], 2)
+        self.assertEqual(response.json()["data"]["pagination"]["total"], 3)
+        self.assertEqual(response.json()["data"]["pagination"]["total_pages"], 2)
+        self.assertEqual(len(response.json()["data"]["items"]), 1)
+        self.assertEqual(response.json()["data"]["items"][0]["status"], "CHECKED_OUT")

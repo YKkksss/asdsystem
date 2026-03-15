@@ -1,4 +1,9 @@
-import http, { buildServerAssetUrl, type ApiResponse } from "@/api/http"
+import http, {
+  buildServerAssetUrl,
+  type ApiResponse,
+  type PaginatedResponseData,
+  type PaginationQueryParams,
+} from "@/api/http"
 import { archiveUploadMaxSizeMb, buildUploadAccept, validateUploadFiles } from "@/utils/upload"
 
 export const borrowReturnAttachmentAllowedExtensions = ["pdf", "jpg", "jpeg", "png"] as const
@@ -119,6 +124,7 @@ export interface BorrowApplicationQueryParams {
   keyword?: string
   archive_code?: string
   status?: string
+  status_in?: string
 }
 
 export interface BorrowApplicationPayload {
@@ -150,6 +156,21 @@ export interface BorrowReturnConfirmPayload {
 
 export async function fetchBorrowApplications(params?: BorrowApplicationQueryParams) {
   const response = await http.get<ApiResponse<BorrowApplication[]>>("/borrowing/applications/", { params })
+  return response.data
+}
+
+export async function fetchBorrowApplicationsPage(
+  params?: BorrowApplicationQueryParams & PaginationQueryParams,
+) {
+  const response = await http.get<ApiResponse<PaginatedResponseData<BorrowApplication>>>(
+    "/borrowing/applications/",
+    {
+      params: {
+        ...params,
+        paginate: true,
+      },
+    },
+  )
   return response.data
 }
 

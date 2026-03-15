@@ -22,7 +22,7 @@ usage() {
   1. 默认执行 up，会自动构建镜像、启动容器、执行迁移并初始化基础账号。
   2. 首次部署后，账号清单会输出到 runtime/deployment_runtime/accounts.md。
   3. 如需自定义端口或管理员账号，可在执行前设置环境变量，例如：
-     ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 ./scripts/deploy.sh
+     ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 ./scripts/deploy.sh
 EOF
 }
 
@@ -72,8 +72,8 @@ show_accounts() {
   fi
 
   echo
-  echo "未检测到账号清单文件，默认初始化账号如下："
-  echo "管理员：admin / ${ASD_ADMIN_PASSWORD:-Admin12345}"
+  echo "未检测到账号清单文件，请优先查看 backend-init 日志或重新执行部署。"
+  echo "管理员：admin / 部署时自动生成或由 ASD_ADMIN_PASSWORD 指定"
   echo "档案员：archivist / Archivist12345"
   echo "借阅人：borrower / Borrower12345"
   echo "审计员：auditor / Auditor12345"

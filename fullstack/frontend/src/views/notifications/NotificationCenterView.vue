@@ -65,7 +65,16 @@
         :data-source="notifications"
         :loading="loading"
         row-key="id"
-        :pagination="{ pageSize: 8, showSizeChanger: false }"
+        :pagination="{
+          current: notificationPagination.current,
+          pageSize: notificationPagination.pageSize,
+          total: notificationPagination.total,
+          showSizeChanger: true,
+          pageSizeOptions: ['8', '20', '50'],
+          onChange: handleNotificationTableChange,
+          onShowSizeChange: handleNotificationTableChange,
+          showTotal: (total: number) => `共 ${total} 条`,
+        }"
       >
         <template #emptyText>
           <a-empty description="暂无通知消息" />
@@ -130,6 +139,7 @@ import { useRouter } from "vue-router"
 import { dispatchBorrowReminders } from "@/api/borrowing"
 import {
   fetchNotifications,
+  fetchNotificationsPage,
   fetchNotificationSummary,
   markAllNotificationsAsRead,
   markNotificationAsRead,
@@ -181,6 +191,11 @@ const markingId = ref<number | null>(null)
 const openingId = ref<number | null>(null)
 const markingAllRead = ref(false)
 const notifications = ref<SystemNotification[]>([])
+const notificationPagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+})
 const summary = reactive<NotificationSummary>({
   total_count: 0,
   unread_count: 0,
@@ -202,7 +217,14 @@ function formatDateTime(value: string | null) {
 function handleReset() {
   filters.notification_type = undefined
   filters.is_read = undefined
+  notificationPagination.current = 1
   void loadPageData()
+}
+
+function handleNotificationTableChange(page: number, pageSize: number) {
+  notificationPagination.current = page
+  notificationPagination.pageSize = pageSize
+  void loadNotifications()
 }
 
 function canOpenBusiness(notification: SystemNotification) {
@@ -238,11 +260,16 @@ function buildNotificationTarget(notification: SystemNotification) {
 async function loadNotifications() {
   loading.value = true
   try {
-    const response = await fetchNotifications({
+    const response = await fetchNotificationsPage({
       notification_type: filters.notification_type,
       is_read: filters.is_read,
+      page: notificationPagination.current,
+      page_size: notificationPagination.pageSize,
     })
-    notifications.value = response.data
+    notifications.value = response.data.items
+    notificationPagination.total = response.data.pagination.total
+    notificationPagination.current = response.data.pagination.page
+    notificationPagination.pageSize = response.data.pagination.page_size
   } catch (error) {
     handleRequestError(error, "加载通知消息失败。")
   } finally {
