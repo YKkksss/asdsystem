@@ -2,8 +2,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.accounts.models import DataScope, Role
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
 
@@ -24,6 +24,23 @@ class HealthApiTests(TestCase):
             data_scope=DataScope.ALL,
             status=True,
         )
+        self.health_detail_permission, _ = SystemPermission.objects.get_or_create(
+            permission_code="button.system.health.detail",
+            defaults={
+                "permission_name": "查看系统健康详情",
+                "permission_type": "BUTTON",
+                "module_name": "system",
+                "sort_order": 395,
+                "status": True,
+            },
+        )
+        self.ops_role = Role.objects.create(
+            role_code="OPS_VIEWER",
+            role_name="运维查看员",
+            data_scope=DataScope.ALL,
+            status=True,
+        )
+        assign_permissions_to_role(self.ops_role, [self.health_detail_permission.id])
         self.admin_user = User.objects.create_user(
             username="health_admin",
             password="HealthAdmin12345",
@@ -32,6 +49,14 @@ class HealthApiTests(TestCase):
             is_staff=True,
         )
         assign_roles_to_user(self.admin_user, [self.admin_role.id])
+        self.ops_user = User.objects.create_user(
+            username="health_ops",
+            password="HealthOps12345",
+            real_name="健康检查运维",
+            dept=self.department,
+            is_staff=True,
+        )
+        assign_roles_to_user(self.ops_user, [self.ops_role.id])
 
     def test_root_health_returns_success(self) -> None:
         response = self.client.get(reverse("root-health"))
@@ -66,6 +91,17 @@ class HealthApiTests(TestCase):
 
     def test_api_health_detail_should_allow_admin_request_from_public_network(self) -> None:
         self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            "/api/v1/system/health/detail/",
+            HTTP_X_FORWARDED_FOR="8.8.8.8",
+            REMOTE_ADDR="8.8.8.8",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_api_health_detail_should_allow_permission_based_request_from_public_network(self) -> None:
+        self.client.force_login(self.ops_user)
 
         response = self.client.get(
             "/api/v1/system/health/detail/",

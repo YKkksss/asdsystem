@@ -57,8 +57,18 @@
 
           <template v-else-if="column.key === 'actions'">
             <a-space wrap>
-              <a-button type="link" @click="openActionModal(record, 'APPROVE')">审批通过</a-button>
-              <a-button danger type="link" @click="openActionModal(record, 'REJECT')">驳回申请</a-button>
+              <a-button v-if="canApproveBorrowApplications" type="link" @click="openActionModal(record, 'APPROVE')">
+                审批通过
+              </a-button>
+              <a-button
+                v-if="canApproveBorrowApplications"
+                danger
+                type="link"
+                @click="openActionModal(record, 'REJECT')"
+              >
+                驳回申请
+              </a-button>
+              <span v-if="!canApproveBorrowApplications" class="action-muted">仅查看</span>
             </a-space>
           </template>
         </template>
@@ -103,15 +113,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref, watch } from "vue"
 import { message } from "ant-design-vue"
+import { useRoute, useRouter } from "vue-router"
 
 import {
   approveBorrowApplication,
+  fetchBorrowApplicationDetail,
   fetchBorrowApplicationsPage,
   type BorrowApplication,
 } from "@/api/borrowing"
+import { useAuthStore } from "@/stores/auth"
+import { profileHasAnyPermission } from "@/utils/access"
 import { getRequestErrorMessage, getRequestErrorStatus } from "@/utils/request"
+
+const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 
 const statusLabelMap: Record<string, string> = {
   PENDING_APPROVAL: "待审批",
@@ -140,6 +158,10 @@ const pendingAction = ref<"APPROVE" | "REJECT">("APPROVE")
 const actionForm = reactive({
   opinion: "",
 })
+
+const canApproveBorrowApplications = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.borrow.approve"], ["ADMIN"]),
+)
 
 const summaryCards = computed(() => {
   const total = applicationPagination.total
@@ -173,10 +195,54 @@ function handleApplicationTableChange(page: number, pageSize: number) {
 }
 
 function openActionModal(application: BorrowApplication, action: "APPROVE" | "REJECT") {
+  if (!canApproveBorrowApplications.value) {
+    message.warning("当前账号无权审批借阅申请。")
+    return
+  }
   selectedApplication.value = application
   pendingAction.value = action
   resetModal()
   modalOpen.value = true
+}
+
+async function openActionModalById(applicationId: number) {
+  if (!canApproveBorrowApplications.value) {
+    message.warning("当前账号无权审批借阅申请。")
+    return
+  }
+
+  try {
+    const response = await fetchBorrowApplicationDetail(applicationId)
+    selectedApplication.value = response.data
+    pendingAction.value = "APPROVE"
+    resetModal()
+    modalOpen.value = true
+  } catch (error) {
+    const status = getRequestErrorStatus(error)
+    if (status === 404) {
+      message.error("借阅申请不存在或状态已变化，请刷新列表后重试。")
+      await loadApplications()
+      return
+    }
+    if (status === 403) {
+      message.error("当前账号无权审批该借阅申请。")
+      return
+    }
+    handleRequestError(error, "加载借阅审批详情失败。")
+  }
+}
+
+async function consumeRouteApplicationId() {
+  const rawApplicationId = route.query.applicationId
+  const applicationId = Number(rawApplicationId)
+  if (!Number.isInteger(applicationId) || applicationId <= 0) {
+    return
+  }
+
+  await openActionModalById(applicationId)
+  const nextQuery = { ...route.query }
+  delete nextQuery.applicationId
+  await router.replace({ query: nextQuery })
 }
 
 async function loadApplications() {
@@ -200,6 +266,10 @@ async function loadApplications() {
 }
 
 async function handleSubmitAction() {
+  if (!canApproveBorrowApplications.value) {
+    message.warning("当前账号无权审批借阅申请。")
+    return
+  }
   if (!selectedApplication.value) {
     return
   }
@@ -254,6 +324,14 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 onMounted(() => {
   void loadApplications()
 })
+
+watch(
+  () => route.query.applicationId,
+  () => {
+    void consumeRouteApplicationId()
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -282,6 +360,10 @@ onMounted(() => {
 .summary-card span,
 .summary-card small {
   color: #475467;
+}
+
+.action-muted {
+  color: #667085;
 }
 
 .toolbar {

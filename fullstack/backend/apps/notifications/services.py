@@ -7,8 +7,11 @@ from urllib.request import Request, urlopen
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
+from apps.archives.models import ArchiveFile
+from apps.digitization.models import ScanTaskItem
 from apps.notifications.models import EmailTask, EmailTaskStatus, NotificationType, SystemNotification
 
 
@@ -96,6 +99,55 @@ def create_system_notification(
         },
     )
     return notification
+
+
+def resolve_notification_route_path(notification: SystemNotification) -> str:
+    if notification.biz_type == "borrow_application" and notification.biz_id:
+        return f"/borrowing/applications?applicationId={notification.biz_id}"
+
+    if notification.biz_type == "destroy_application" and notification.biz_id:
+        return f"/destruction/applications?applicationId={notification.biz_id}"
+
+    if notification.biz_type == "scan_task" and notification.biz_id:
+        return f"/digitization/scan-tasks/{notification.biz_id}"
+
+    if notification.biz_type == "scan_task_item" and notification.biz_id:
+        task_item = ScanTaskItem.objects.filter(id=notification.biz_id).values("task_id").first()
+        if task_item and task_item["task_id"]:
+            return f"/digitization/scan-tasks/{task_item['task_id']}?itemId={notification.biz_id}"
+        return "/digitization/scan-tasks"
+
+    if notification.biz_type == "archive_record" and notification.biz_id:
+        return f"/archives/records?archiveId={notification.biz_id}"
+
+    if notification.biz_type == "archive_file" and notification.biz_id:
+        archive_file = ArchiveFile.objects.filter(id=notification.biz_id).values("archive_id").first()
+        if archive_file and archive_file["archive_id"]:
+            return f"/archives/records?archiveId={archive_file['archive_id']}&fileId={notification.biz_id}"
+        return "/archives/records"
+
+    if notification.biz_type == "report_export":
+        return "/reports/center"
+
+    if notification.biz_type == "system_user":
+        if notification.biz_id:
+            return f"/system/management?tab=users&userId={notification.biz_id}"
+        return "/system/management"
+
+    return f"/notifications/messages?notificationId={notification.id}"
+
+
+def build_notification_page_position(*, queryset, notification: SystemNotification, page_size: int) -> dict[str, int]:
+    before_count = queryset.exclude(id=notification.id).filter(
+        Q(is_read__lt=notification.is_read)
+        | Q(is_read=notification.is_read, created_at__gt=notification.created_at)
+        | Q(is_read=notification.is_read, created_at=notification.created_at, id__gt=notification.id)
+    ).count()
+    return {
+        "page": before_count // page_size + 1,
+        "page_size": page_size,
+        "row_index": before_count,
+    }
 
 
 @transaction.atomic

@@ -1,7 +1,7 @@
 from rest_framework import decorators, mixins, status, viewsets
 from rest_framework.permissions import IsAuthenticated
 
-from apps.common.permissions import IsSystemAdmin
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.organizations.api.serializers import DepartmentSerializer
@@ -19,6 +19,8 @@ class DepartmentViewSet(
 ):
     queryset = Department.objects.select_related("parent").order_by("sort_order", "id")
     serializer_class = DepartmentSerializer
+    required_permission_codes = {"button.system.department.manage"}
+    permission_fallback_roles = {"ADMIN"}
     search_fields = ["dept_code", "dept_name"]
     ordering_fields = ["sort_order", "created_at", "id"]
 
@@ -26,7 +28,7 @@ class DepartmentViewSet(
         if self.action in {"list", "retrieve", "tree"}:
             permission_classes = [IsAuthenticated]
         else:
-            permission_classes = [IsSystemAdmin]
+            permission_classes = [HasConfiguredSystemPermission]
         return [permission() for permission in permission_classes]
 
     def list(self, request, *args, **kwargs):

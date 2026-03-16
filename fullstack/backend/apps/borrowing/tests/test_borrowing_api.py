@@ -8,8 +8,8 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import DataScope, Role, SecurityClearance
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveRecord, ArchiveStatus, ArchiveStorageLocation
 from apps.notifications.models import NotificationType, SystemNotification
 from apps.organizations.models import Department
@@ -50,6 +50,36 @@ class BorrowingApiTests(APITestCase):
             data_scope=DataScope.ALL,
             status=True,
         )
+        self.borrow_approve_permission = SystemPermission.objects.create(
+            permission_code="button.borrow.approve",
+            permission_name="审批借阅申请",
+            permission_type="BUTTON",
+            module_name="borrowing",
+            sort_order=290,
+            status=True,
+        )
+        self.borrow_checkout_permission = SystemPermission.objects.create(
+            permission_code="button.borrow.checkout",
+            permission_name="办理借阅出库",
+            permission_type="BUTTON",
+            module_name="borrowing",
+            sort_order=300,
+            status=True,
+        )
+        self.approver_role = Role.objects.create(
+            role_code="BORROW_APPROVER",
+            role_name="借阅审批人",
+            data_scope=DataScope.DEPT,
+            status=True,
+        )
+        assign_permissions_to_role(self.approver_role, [self.borrow_approve_permission.id])
+        self.checkout_role = Role.objects.create(
+            role_code="BORROW_CHECKOUT",
+            role_name="借阅出库员",
+            data_scope=DataScope.DEPT,
+            status=True,
+        )
+        assign_permissions_to_role(self.checkout_role, [self.borrow_checkout_permission.id])
 
         self.approver_user = User.objects.create_user(
             username="leader",
@@ -59,7 +89,7 @@ class BorrowingApiTests(APITestCase):
             is_staff=True,
             security_clearance_level=SecurityClearance.SECRET,
         )
-        assign_roles_to_user(self.approver_user, [self.borrower_role.id])
+        assign_roles_to_user(self.approver_user, [self.borrower_role.id, self.approver_role.id])
 
         self.archivist_user = User.objects.create_user(
             username="archivist",
@@ -70,6 +100,16 @@ class BorrowingApiTests(APITestCase):
             security_clearance_level=SecurityClearance.SECRET,
         )
         assign_roles_to_user(self.archivist_user, [self.archivist_role.id])
+
+        self.checkout_user = User.objects.create_user(
+            username="checkout",
+            password="Checkout12345",
+            real_name="出库办理员",
+            dept=self.department,
+            is_staff=True,
+            security_clearance_level=SecurityClearance.SECRET,
+        )
+        assign_roles_to_user(self.checkout_user, [self.checkout_role.id])
 
         self.borrower_user = User.objects.create_user(
             username="borrower",
@@ -492,3 +532,108 @@ class BorrowingApiTests(APITestCase):
         self.assertEqual(response.json()["data"]["pagination"]["total_pages"], 2)
         self.assertEqual(len(response.json()["data"]["items"]), 1)
         self.assertEqual(response.json()["data"]["items"][0]["status"], "CHECKED_OUT")
+
+    def test_custom_approval_role_should_list_pending_scope(self) -> None:
+        archive = self.create_archive(
+            archive_code="A2026-B201",
+            security_level=SecurityClearance.INTERNAL,
+        )
+        expected_return_at = (timezone.now() + timedelta(days=4)).isoformat()
+
+        self.client.force_authenticate(self.borrower_user)
+        create_response = self.client.post(
+            "/api/v1/borrowing/applications/",
+            {
+                "archive_id": archive.id,
+                "purpose": "审批列表权限测试",
+                "expected_return_at": expected_return_at,
+            },
+            format="json",
+        )
+
+        application_id = create_response.json()["data"]["id"]
+
+        self.client.force_authenticate(self.approver_user)
+        response = self.client.get("/api/v1/borrowing/applications/", {"scope": "approval"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["data"]), 1)
+        self.assertEqual(response.json()["data"][0]["id"], application_id)
+        self.assertEqual(response.json()["data"][0]["current_approver_id"], self.approver_user.id)
+
+    def test_custom_checkout_role_should_list_checkout_scope_and_retrieve_detail(self) -> None:
+        archive = self.create_archive(
+            archive_code="A2026-B202",
+            security_level=SecurityClearance.INTERNAL,
+        )
+        expected_return_at = (timezone.now() + timedelta(days=4)).isoformat()
+
+        self.client.force_authenticate(self.borrower_user)
+        create_response = self.client.post(
+            "/api/v1/borrowing/applications/",
+            {
+                "archive_id": archive.id,
+                "purpose": "出库列表权限测试",
+                "expected_return_at": expected_return_at,
+            },
+            format="json",
+        )
+        application_id = create_response.json()["data"]["id"]
+
+        self.client.force_authenticate(self.approver_user)
+        self.client.post(
+            f"/api/v1/borrowing/applications/{application_id}/approve/",
+            {
+                "action": "APPROVE",
+                "opinion": "允许出库。",
+            },
+            format="json",
+        )
+
+        self.client.force_authenticate(self.checkout_user)
+        list_response = self.client.get("/api/v1/borrowing/applications/", {"scope": "checkout"})
+        detail_response = self.client.get(f"/api/v1/borrowing/applications/{application_id}/")
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.json()["data"]), 1)
+        self.assertEqual(list_response.json()["data"][0]["id"], application_id)
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["data"]["id"], application_id)
+
+    def test_user_without_checkout_scope_permission_should_receive_forbidden(self) -> None:
+        self.client.force_authenticate(self.borrower_user)
+
+        response = self.client.get("/api/v1/borrowing/applications/", {"scope": "checkout"})
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_user_without_approve_permission_should_not_approve_borrow_application(self) -> None:
+        archive = self.create_archive(
+            archive_code="A2026-B099",
+            security_level=SecurityClearance.INTERNAL,
+        )
+        expected_return_at = (timezone.now() + timedelta(days=3)).isoformat()
+
+        self.client.force_authenticate(self.borrower_user)
+        create_response = self.client.post(
+            "/api/v1/borrowing/applications/",
+            {
+                "archive_id": archive.id,
+                "purpose": "越权审批测试",
+                "expected_return_at": expected_return_at,
+            },
+            format="json",
+        )
+        application_id = create_response.json()["data"]["id"]
+
+        self.client.force_authenticate(self.borrower_user)
+        response = self.client.post(
+            f"/api/v1/borrowing/applications/{application_id}/approve/",
+            {
+                "action": "APPROVE",
+                "opinion": "不应通过",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)

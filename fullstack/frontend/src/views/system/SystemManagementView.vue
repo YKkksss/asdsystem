@@ -1,6 +1,6 @@
 <template>
   <section class="system-page">
-    <template v-if="isSystemAdmin">
+    <template v-if="canAccessSystemManagement">
       <div class="summary-grid">
         <a-card v-for="item in summaryCards" :key="item.label" :bordered="false" class="summary-card">
           <span>{{ item.label }}</span>
@@ -37,7 +37,7 @@
 
       <a-card :bordered="false" class="panel-card">
         <a-tabs v-model:activeKey="activeTab">
-          <a-tab-pane key="users" tab="用户管理">
+          <a-tab-pane v-if="canManageUsers" key="users" tab="用户管理">
             <div class="tab-toolbar">
               <a-input-search
                 v-model:value="userKeyword"
@@ -48,7 +48,7 @@
 
               <a-space wrap>
                 <a-button :loading="userLoading" @click="loadUsersData">刷新用户</a-button>
-                <a-button type="primary" @click="openCreateUser">新建用户</a-button>
+                <a-button v-if="canManageUsers" type="primary" @click="openCreateUser">新建用户</a-button>
               </a-space>
             </div>
 
@@ -57,7 +57,13 @@
               :data-source="filteredUsers"
               :loading="userLoading"
               row-key="id"
-              :pagination="{ pageSize: 8, showSizeChanger: false }"
+              :row-class-name="getUserRowClassName"
+              :pagination="{
+                current: userPagination.current,
+                pageSize: userPagination.pageSize,
+                showSizeChanger: false,
+                onChange: handleUserTableChange,
+              }"
             >
               <template #emptyText>
                 <a-empty description="暂无用户数据" />
@@ -110,9 +116,9 @@
 
                 <template v-else-if="column.key === 'actions'">
                   <a-space wrap>
-                    <a-button type="link" @click="openEditUser(record)">编辑</a-button>
+                    <a-button v-if="canManageUsers" type="link" @click="openEditUser(record)">编辑</a-button>
                     <a-button
-                      v-if="record.lock_until_at || record.failed_login_count > 0"
+                      v-if="canManageUsers && (record.lock_until_at || record.failed_login_count > 0)"
                       type="link"
                       :loading="unlockingUserId === record.id"
                       @click="handleUnlockUser(record.id)"
@@ -125,7 +131,7 @@
             </a-table>
           </a-tab-pane>
 
-          <a-tab-pane key="roles" tab="角色管理">
+          <a-tab-pane v-if="canManageRoles" key="roles" tab="角色管理">
             <div class="tab-toolbar">
               <a-input-search
                 v-model:value="roleKeyword"
@@ -136,8 +142,23 @@
 
               <a-space wrap>
                 <a-button :loading="roleLoading" @click="loadRolesData">刷新角色</a-button>
-                <a-button type="primary" @click="openCreateRole">新建角色</a-button>
+                <a-button v-if="canManageRoles" type="primary" @click="openCreateRole">新建角色</a-button>
               </a-space>
+            </div>
+
+            <div class="role-insight-stack">
+              <RolePermissionTemplateGallery
+                :loading="roleLoading || permissionLoading || permissionTemplateLoading"
+                :permissions="permissions"
+                :roles="roles"
+                :templates="permissionTemplates"
+              />
+
+              <RolePermissionMatrixPanel
+                :loading="roleLoading || permissionLoading"
+                :permissions="permissions"
+                :roles="roles"
+              />
             </div>
 
             <a-table
@@ -176,13 +197,13 @@
                 </template>
 
                 <template v-else-if="column.key === 'actions'">
-                  <a-button type="link" @click="openEditRole(record)">编辑</a-button>
+                  <a-button v-if="canManageRoles" type="link" @click="openEditRole(record)">编辑</a-button>
                 </template>
               </template>
             </a-table>
           </a-tab-pane>
 
-          <a-tab-pane key="permissions" tab="权限项管理">
+          <a-tab-pane v-if="canManagePermissions" key="permissions" tab="权限项管理">
             <div class="tab-toolbar">
               <a-input-search
                 v-model:value="permissionKeyword"
@@ -193,7 +214,7 @@
 
               <a-space wrap>
                 <a-button :loading="permissionLoading" @click="loadPermissionsData">刷新权限</a-button>
-                <a-button type="primary" @click="openCreatePermission">新建权限</a-button>
+                <a-button v-if="canManagePermissions" type="primary" @click="openCreatePermission">新建权限</a-button>
               </a-space>
             </div>
 
@@ -241,13 +262,13 @@
                 </template>
 
                 <template v-else-if="column.key === 'actions'">
-                  <a-button type="link" @click="openEditPermission(record)">编辑</a-button>
+                  <a-button v-if="canManagePermissions" type="link" @click="openEditPermission(record)">编辑</a-button>
                 </template>
               </template>
             </a-table>
           </a-tab-pane>
 
-          <a-tab-pane key="departments" tab="组织管理">
+          <a-tab-pane v-if="canManageDepartments" key="departments" tab="组织管理">
             <div class="tab-toolbar">
               <a-input-search
                 v-model:value="departmentKeyword"
@@ -258,7 +279,7 @@
 
               <a-space wrap>
                 <a-button :loading="departmentLoading" @click="loadDepartmentsData">刷新部门</a-button>
-                <a-button type="primary" @click="openCreateDepartment">新建部门</a-button>
+                <a-button v-if="canManageDepartments" type="primary" @click="openCreateDepartment">新建部门</a-button>
               </a-space>
             </div>
 
@@ -299,13 +320,13 @@
                 </template>
 
                 <template v-else-if="column.key === 'actions'">
-                  <a-button type="link" @click="openEditDepartment(record)">编辑</a-button>
+                  <a-button v-if="canManageDepartments" type="link" @click="openEditDepartment(record)">编辑</a-button>
                 </template>
               </template>
             </a-table>
           </a-tab-pane>
 
-          <a-tab-pane key="health" tab="系统健康">
+          <a-tab-pane v-if="canAccessSystemManagement" key="health" tab="系统健康">
             <a-spin :spinning="healthLoading">
               <div class="health-grid">
                 <a-card :bordered="false" class="health-card">
@@ -362,8 +383,8 @@
     <a-result
       v-else
       status="403"
-      title="仅管理员可访问系统管理"
-      sub-title="请使用管理员账号登录，或返回工作台处理业务模块。"
+      title="当前账号无权访问系统管理"
+      sub-title="请联系管理员分配系统配置权限，或返回工作台处理业务模块。"
     >
       <template #extra>
         <RouterLink to="/">
@@ -497,7 +518,58 @@
           </a-form-item>
         </div>
 
+        <a-form-item label="快捷授权">
+          <div class="template-toolbar">
+            <a-select
+              v-model:value="selectedRoleTemplateKey"
+              allow-clear
+              class="template-select"
+              :loading="permissionTemplateLoading"
+              :options="permissionTemplateOptions"
+              placeholder="选择系统默认权限模板"
+            />
+
+            <a-space wrap>
+              <a-button :disabled="!selectedRoleTemplate" @click="handleApplyRoleTemplate('replace')">
+                套用模板
+              </a-button>
+              <a-button :disabled="!selectedRoleTemplate" @click="handleApplyRoleTemplate('append')">
+                叠加模板
+              </a-button>
+              <a-button @click="handleSelectAllPermissions">全选权限</a-button>
+              <a-button @click="handleClearRolePermissions">清空权限</a-button>
+            </a-space>
+          </div>
+
+          <div v-if="selectedRoleTemplate" class="template-hint">
+            <strong>{{ selectedRoleTemplate.template_name }}</strong>
+            <span>{{ selectedRoleTemplate.description }}</span>
+            <small>当前模板可匹配 {{ selectedRoleTemplateResolvedCount }} 项启用权限。</small>
+          </div>
+        </a-form-item>
+
+        <a-form-item label="模块快捷选择">
+          <div class="permission-group-grid">
+            <button
+              v-for="group in permissionModuleGroups"
+              :key="group.module_name"
+              class="permission-group-card"
+              :class="{ 'permission-group-card-active': isPermissionGroupFullySelected(group.permission_ids) }"
+              type="button"
+              @click="togglePermissionGroup(group.permission_ids)"
+            >
+              <strong>{{ group.module_label }}</strong>
+              <span>已选 {{ countSelectedPermissions(group.permission_ids) }}/{{ group.permission_ids.length }}</span>
+              <small>{{ group.permission_count }} 项启用权限</small>
+            </button>
+          </div>
+        </a-form-item>
+
         <a-form-item label="权限配置">
+          <div class="permission-summary">
+            <span>已选权限 {{ roleForm.permission_ids.length }} 项</span>
+            <small>可继续通过模板、模块快捷选择或下方明细多选进行调整。</small>
+          </div>
           <a-select
             v-model:value="roleForm.permission_ids"
             mode="multiple"
@@ -671,21 +743,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue"
 import { message } from "ant-design-vue"
-import { RouterLink } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 
+import RolePermissionMatrixPanel from "@/views/system/components/RolePermissionMatrixPanel.vue"
+import RolePermissionTemplateGallery from "@/views/system/components/RolePermissionTemplateGallery.vue"
 import {
   createPermission,
   createRole,
   createUser,
   fetchPermissions,
+  fetchPermissionTemplates,
   fetchRoles,
   fetchUsers,
   unlockUser,
   updatePermission,
   updateRole,
   updateUser,
+  type PermissionTemplateItem,
   type RoleItem,
   type RolePayload,
   type SystemPermissionItem,
@@ -702,8 +778,12 @@ import {
 } from "@/api/organizations"
 import { fetchSystemHealth, type SystemHealthPayload } from "@/api/system"
 import { useAuthStore } from "@/stores/auth"
+import { profileHasAnyPermission } from "@/utils/access"
 
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+const USER_TABLE_PAGE_SIZE = 8
 
 const securityLabelMap: Record<string, string> = {
   PUBLIC: "公开",
@@ -732,15 +812,29 @@ const permissionTypeColorMap: Record<string, string> = {
   API: "cyan",
 }
 
+const permissionModuleLabelMap: Record<string, string> = {
+  dashboard: "工作台",
+  archives: "档案业务",
+  digitization: "数字化",
+  borrowing: "借阅业务",
+  notifications: "通知中心",
+  destruction: "销毁业务",
+  reports: "报表中心",
+  audit: "审计监管",
+  system: "系统配置",
+}
+
 const activeTab = ref("users")
 const userKeyword = ref("")
 const roleKeyword = ref("")
 const permissionKeyword = ref("")
 const departmentKeyword = ref("")
+const focusedUserId = ref<number | null>(null)
 
 const userLoading = ref(false)
 const roleLoading = ref(false)
 const permissionLoading = ref(false)
+const permissionTemplateLoading = ref(false)
 const departmentLoading = ref(false)
 const healthLoading = ref(false)
 
@@ -763,8 +857,14 @@ const editingDepartmentId = ref<number | null>(null)
 const users = ref<UserItem[]>([])
 const roles = ref<RoleItem[]>([])
 const permissions = ref<SystemPermissionItem[]>([])
+const permissionTemplates = ref<PermissionTemplateItem[]>([])
 const departments = ref<DepartmentOption[]>([])
 const healthPayload = ref<SystemHealthPayload | null>(null)
+const selectedRoleTemplateKey = ref<string | undefined>(undefined)
+const userPagination = reactive({
+  current: 1,
+  pageSize: USER_TABLE_PAGE_SIZE,
+})
 
 const userForm = reactive({
   dept_id: undefined as number | undefined,
@@ -858,9 +958,60 @@ const departmentColumns = [
   { title: "操作", key: "actions", width: 120 },
 ]
 
-const isSystemAdmin = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => role.role_code === "ADMIN")),
+const canAccessSystemManagement = computed(() =>
+  profileHasAnyPermission(
+    authStore.profile,
+    [
+      "menu.system_management",
+      "button.system.user.manage",
+      "button.system.role.manage",
+      "button.system.permission.manage",
+      "button.system.department.manage",
+    ],
+    ["ADMIN"],
+  ),
 )
+
+const canManageUsers = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.system.user.manage"], ["ADMIN"]),
+)
+
+const canManageRoles = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.system.role.manage"], ["ADMIN"]),
+)
+
+const canManagePermissions = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.system.permission.manage"], ["ADMIN"]),
+)
+
+const canManageDepartments = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.system.department.manage"], ["ADMIN"]),
+)
+
+const canLoadRoleOptions = computed(() => canManageUsers.value || canManageRoles.value)
+const canLoadPermissionCatalog = computed(() => canManagePermissions.value || canManageRoles.value)
+const canLoadDepartmentOptions = computed(() => canManageUsers.value || canManageDepartments.value)
+const visibleTabKeys = computed(() => {
+  const tabKeys: string[] = []
+
+  if (canManageUsers.value) {
+    tabKeys.push("users")
+  }
+  if (canManageRoles.value) {
+    tabKeys.push("roles")
+  }
+  if (canManagePermissions.value) {
+    tabKeys.push("permissions")
+  }
+  if (canManageDepartments.value) {
+    tabKeys.push("departments")
+  }
+  if (canAccessSystemManagement.value) {
+    tabKeys.push("health")
+  }
+
+  return tabKeys
+})
 
 const filteredUsers = computed(() => {
   const keyword = userKeyword.value.trim().toLowerCase()
@@ -915,33 +1066,60 @@ const filteredDepartments = computed(() => {
   )
 })
 
-const summaryCards = computed(() => [
-  {
-    label: "用户总数",
-    value: users.value.length,
-    caption: `${users.value.filter((item) => item.status).length} 个启用账号`,
-  },
-  {
-    label: "锁定账号",
-    value: users.value.filter((item) => Boolean(item.lock_until_at)).length,
-    caption: "连续输错密码后进入锁定期的账号数量",
-  },
-  {
-    label: "有效角色",
-    value: roles.value.filter((item) => item.status).length,
-    caption: `${permissions.value.filter((item) => item.status).length} 个启用权限项`,
-  },
-  {
-    label: "启用部门",
-    value: departments.value.filter((item) => item.status).length,
-    caption: "包含已配置审批负责人的组织节点",
-  },
-  {
+const summaryCards = computed(() => {
+  const cards: Array<{ label: string; value: number | string; caption: string }> = []
+
+  if (canManageUsers.value) {
+    cards.push(
+      {
+        label: "用户总数",
+        value: users.value.length,
+        caption: `${users.value.filter((item) => item.status).length} 个启用账号`,
+      },
+      {
+        label: "锁定账号",
+        value: users.value.filter((item) => Boolean(item.lock_until_at)).length,
+        caption: "连续输错密码后进入锁定期的账号数量",
+      },
+    )
+  }
+
+  if (canManageRoles.value && canManagePermissions.value) {
+    cards.push({
+      label: "授权资源",
+      value: roles.value.filter((item) => item.status).length,
+      caption: `${permissions.value.filter((item) => item.status).length} 个启用权限项`,
+    })
+  } else if (canManageRoles.value) {
+    cards.push({
+      label: "有效角色",
+      value: roles.value.filter((item) => item.status).length,
+      caption: `${permissions.value.filter((item) => item.status).length} 个可分配权限项`,
+    })
+  } else if (canManagePermissions.value) {
+    cards.push({
+      label: "权限项总数",
+      value: permissions.value.filter((item) => item.status).length,
+      caption: "当前可维护的启用权限项总数",
+    })
+  }
+
+  if (canManageDepartments.value) {
+    cards.push({
+      label: "启用部门",
+      value: departments.value.filter((item) => item.status).length,
+      caption: "包含已配置审批负责人的组织节点",
+    })
+  }
+
+  cards.push({
     label: "后端状态",
     value: healthStatusLabel.value,
     caption: healthPayload.value?.time ? `最近检查 ${formatDateTime(healthPayload.value.time)}` : "尚未执行健康检查",
-  },
-])
+  })
+
+  return cards
+})
 
 const healthStatusLabel = computed(() => {
   if (!healthPayload.value?.status) {
@@ -967,6 +1145,55 @@ const permissionSelectOptions = computed(() =>
       label: `${item.module_name} / ${item.permission_name}（${item.permission_code}）`,
     })),
 )
+
+const permissionCodeToIdMap = computed(
+  () => new Map(permissions.value.filter((item) => item.status).map((item) => [item.permission_code, item.id])),
+)
+
+const permissionTemplateOptions = computed(() =>
+  permissionTemplates.value.map((item) => ({
+    value: item.template_key,
+    label: `${item.template_name}（${item.permission_codes.length} 项）`,
+  })),
+)
+
+const selectedRoleTemplate = computed(
+  () => permissionTemplates.value.find((item) => item.template_key === selectedRoleTemplateKey.value) || null,
+)
+
+const selectedRoleTemplateResolvedCount = computed(() => resolveTemplatePermissionIds(selectedRoleTemplate.value).length)
+
+const permissionModuleGroups = computed(() => {
+  const groupMap = new Map<
+    string,
+    {
+      module_name: string
+      module_label: string
+      permission_ids: number[]
+      permission_count: number
+    }
+  >()
+
+  permissions.value
+    .filter((item) => item.status)
+    .sort((left, right) => left.sort_order - right.sort_order || left.id - right.id)
+    .forEach((item) => {
+      const existingGroup = groupMap.get(item.module_name)
+      if (existingGroup) {
+        existingGroup.permission_ids.push(item.id)
+        existingGroup.permission_count += 1
+        return
+      }
+      groupMap.set(item.module_name, {
+        module_name: item.module_name,
+        module_label: permissionModuleLabelMap[item.module_name] || item.module_name,
+        permission_ids: [item.id],
+        permission_count: 1,
+      })
+    })
+
+  return [...groupMap.values()]
+})
 
 const permissionParentOptions = computed(() =>
   permissions.value
@@ -1034,6 +1261,7 @@ function resetRoleForm() {
   roleForm.status = true
   roleForm.permission_ids = []
   roleForm.remark = ""
+  selectedRoleTemplateKey.value = undefined
 }
 
 function resetPermissionForm() {
@@ -1069,13 +1297,184 @@ function formatDateTime(value: string | null) {
   return value.replace("T", " ").slice(0, 19)
 }
 
+function normalizePermissionIds(permissionIds: number[]) {
+  return [...new Set(permissionIds)]
+}
+
+function handleUserTableChange(page: number, pageSize: number) {
+  userPagination.current = page
+  userPagination.pageSize = pageSize
+}
+
+function getUserRowClassName(record: UserItem) {
+  return record.id === focusedUserId.value ? "user-row-focused" : ""
+}
+
+function resolveRouteTab() {
+  const rawTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
+  if (typeof rawTab !== "string") {
+    return null
+  }
+  const normalizedTab = rawTab.trim()
+  return normalizedTab || null
+}
+
+function resolveRouteUserId() {
+  const rawUserId = Array.isArray(route.query.userId) ? route.query.userId[0] : route.query.userId
+  const userId = Number(rawUserId)
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return null
+  }
+  return userId
+}
+
+async function clearManagementRouteTarget() {
+  if (!route.query.tab && !route.query.userId) {
+    return
+  }
+  const nextQuery = { ...route.query }
+  delete nextQuery.tab
+  delete nextQuery.userId
+  await router.replace({ query: nextQuery })
+}
+
+async function scrollToFocusedUser() {
+  await nextTick()
+  window.setTimeout(() => {
+    const row = document.querySelector<HTMLElement>(`.ant-table-row[data-row-key="${focusedUserId.value}"]`)
+    row?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, 80)
+}
+
+function resolveUserPage(userId: number) {
+  const targetIndex = filteredUsers.value.findIndex((item) => item.id === userId)
+  if (targetIndex < 0) {
+    return 1
+  }
+  return Math.floor(targetIndex / userPagination.pageSize) + 1
+}
+
+async function consumeManagementRouteTarget() {
+  const routeUserId = resolveRouteUserId()
+  if (routeUserId && canManageUsers.value && visibleTabKeys.value.includes("users")) {
+    if (!users.value.length && !userLoading.value) {
+      await loadUsersData()
+    }
+
+    userKeyword.value = ""
+    activeTab.value = "users"
+
+    const targetUser = users.value.find((item) => item.id === routeUserId)
+    if (!targetUser) {
+      focusedUserId.value = null
+      await clearManagementRouteTarget()
+      message.warning("目标用户不存在或已被删除。")
+      return
+    }
+
+    userPagination.current = resolveUserPage(routeUserId)
+    focusedUserId.value = routeUserId
+    await scrollToFocusedUser()
+    openEditUser(targetUser)
+    await clearManagementRouteTarget()
+    return
+  }
+
+  const routeTab = resolveRouteTab()
+  if (routeTab && visibleTabKeys.value.includes(routeTab)) {
+    activeTab.value = routeTab
+    await clearManagementRouteTarget()
+    return
+  }
+
+  if (route.query.tab || route.query.userId) {
+    if (visibleTabKeys.value.length) {
+      activeTab.value = visibleTabKeys.value[0]
+    }
+    await clearManagementRouteTarget()
+  }
+}
+
+function resolveTemplatePermissionIds(template: PermissionTemplateItem | null) {
+  if (!template) {
+    return []
+  }
+
+  return normalizePermissionIds(
+    template.permission_codes
+      .map((permissionCode) => permissionCodeToIdMap.value.get(permissionCode))
+      .filter((permissionId): permissionId is number => Boolean(permissionId)),
+  )
+}
+
+function syncSelectedRoleTemplate(roleCode?: string | null) {
+  if (!roleCode) {
+    selectedRoleTemplateKey.value = undefined
+    return
+  }
+
+  const matchedTemplate = permissionTemplates.value.find((item) => item.role_code === roleCode)
+  selectedRoleTemplateKey.value = matchedTemplate?.template_key
+}
+
+function handleApplyRoleTemplate(mode: "replace" | "append") {
+  if (!selectedRoleTemplate.value) {
+    message.warning("请先选择需要套用的权限模板。")
+    return
+  }
+
+  const resolvedPermissionIds = resolveTemplatePermissionIds(selectedRoleTemplate.value)
+  if (!resolvedPermissionIds.length) {
+    message.warning("当前模板未匹配到可用权限，请先检查权限初始化是否完成。")
+    return
+  }
+
+  roleForm.permission_ids = mode === "replace"
+    ? resolvedPermissionIds
+    : normalizePermissionIds([...roleForm.permission_ids, ...resolvedPermissionIds])
+}
+
+function handleSelectAllPermissions() {
+  roleForm.permission_ids = permissions.value.filter((item) => item.status).map((item) => item.id)
+}
+
+function handleClearRolePermissions() {
+  roleForm.permission_ids = []
+}
+
+function countSelectedPermissions(permissionIds: number[]) {
+  const selectedPermissionIdSet = new Set(roleForm.permission_ids)
+  return permissionIds.filter((permissionId) => selectedPermissionIdSet.has(permissionId)).length
+}
+
+function isPermissionGroupFullySelected(permissionIds: number[]) {
+  return permissionIds.length > 0 && countSelectedPermissions(permissionIds) === permissionIds.length
+}
+
+function togglePermissionGroup(permissionIds: number[]) {
+  if (isPermissionGroupFullySelected(permissionIds)) {
+    roleForm.permission_ids = roleForm.permission_ids.filter((permissionId) => !permissionIds.includes(permissionId))
+    return
+  }
+
+  roleForm.permission_ids = normalizePermissionIds([...roleForm.permission_ids, ...permissionIds])
+}
+
 function openCreateUser() {
+  if (!canManageUsers.value) {
+    message.error("当前账号无权维护用户。")
+    return
+  }
   editingUserId.value = null
   resetUserForm()
   userModalOpen.value = true
 }
 
 function openEditUser(record: UserItem) {
+  if (!canManageUsers.value) {
+    message.error("当前账号无权维护用户。")
+    return
+  }
   editingUserId.value = record.id
   userForm.dept_id = record.dept_id
   userForm.username = record.username
@@ -1092,12 +1491,20 @@ function openEditUser(record: UserItem) {
 }
 
 function openCreateRole() {
+  if (!canManageRoles.value) {
+    message.error("当前账号无权维护角色。")
+    return
+  }
   editingRoleId.value = null
   resetRoleForm()
   roleModalOpen.value = true
 }
 
 function openEditRole(record: RoleItem) {
+  if (!canManageRoles.value) {
+    message.error("当前账号无权维护角色。")
+    return
+  }
   editingRoleId.value = record.id
   roleForm.role_code = record.role_code
   roleForm.role_name = record.role_name
@@ -1105,16 +1512,25 @@ function openEditRole(record: RoleItem) {
   roleForm.status = record.status
   roleForm.permission_ids = record.permissions.map((item) => item.id)
   roleForm.remark = record.remark || ""
+  syncSelectedRoleTemplate(record.role_code)
   roleModalOpen.value = true
 }
 
 function openCreatePermission() {
+  if (!canManagePermissions.value) {
+    message.error("当前账号无权维护权限项。")
+    return
+  }
   editingPermissionId.value = null
   resetPermissionForm()
   permissionModalOpen.value = true
 }
 
 function openEditPermission(record: SystemPermissionItem) {
+  if (!canManagePermissions.value) {
+    message.error("当前账号无权维护权限项。")
+    return
+  }
   editingPermissionId.value = record.id
   permissionForm.parent_id = record.parent_id ?? undefined
   permissionForm.permission_code = record.permission_code
@@ -1128,12 +1544,20 @@ function openEditPermission(record: SystemPermissionItem) {
 }
 
 function openCreateDepartment() {
+  if (!canManageDepartments.value) {
+    message.error("当前账号无权维护组织架构。")
+    return
+  }
   editingDepartmentId.value = null
   resetDepartmentForm()
   departmentModalOpen.value = true
 }
 
 function openEditDepartment(record: DepartmentOption) {
+  if (!canManageDepartments.value) {
+    message.error("当前账号无权维护组织架构。")
+    return
+  }
   editingDepartmentId.value = record.id
   departmentForm.parent_id = record.parent_id ?? undefined
   departmentForm.dept_code = record.dept_code
@@ -1150,6 +1574,9 @@ async function loadUsersData() {
   try {
     const response = await fetchUsers()
     users.value = response.data
+    if (focusedUserId.value && !users.value.some((item) => item.id === focusedUserId.value)) {
+      focusedUserId.value = null
+    }
   } catch (error) {
     handleRequestError(error, "加载用户列表失败。")
   } finally {
@@ -1181,6 +1608,19 @@ async function loadPermissionsData() {
   }
 }
 
+async function loadPermissionTemplatesData() {
+  permissionTemplateLoading.value = true
+  try {
+    const response = await fetchPermissionTemplates()
+    permissionTemplates.value = response.data
+    syncSelectedRoleTemplate(roleForm.role_code)
+  } catch (error) {
+    handleRequestError(error, "加载权限模板失败。")
+  } finally {
+    permissionTemplateLoading.value = false
+  }
+}
+
 async function loadDepartmentsData() {
   departmentLoading.value = true
   try {
@@ -1206,16 +1646,32 @@ async function loadHealthData() {
 }
 
 async function loadPageData() {
-  await Promise.all([
-    loadUsersData(),
-    loadRolesData(),
-    loadPermissionsData(),
-    loadDepartmentsData(),
-    loadHealthData(),
-  ])
+  const tasks: Promise<void>[] = [loadHealthData()]
+
+  if (canManageUsers.value) {
+    tasks.push(loadUsersData())
+  }
+  if (canLoadRoleOptions.value) {
+    tasks.push(loadRolesData())
+  }
+  if (canLoadPermissionCatalog.value) {
+    tasks.push(loadPermissionsData())
+  }
+  if (canManageRoles.value) {
+    tasks.push(loadPermissionTemplatesData())
+  }
+  if (canLoadDepartmentOptions.value) {
+    tasks.push(loadDepartmentsData())
+  }
+
+  await Promise.all(tasks)
 }
 
 async function handleSubmitUser() {
+  if (!canManageUsers.value) {
+    message.error("当前账号无权维护用户。")
+    return
+  }
   if (!userForm.dept_id) {
     message.error("请选择所属部门。")
     return
@@ -1266,6 +1722,10 @@ async function handleSubmitUser() {
 }
 
 async function handleSubmitRole() {
+  if (!canManageRoles.value) {
+    message.error("当前账号无权维护角色。")
+    return
+  }
   if (!roleForm.role_code.trim()) {
     message.error("请输入角色编码。")
     return
@@ -1300,6 +1760,10 @@ async function handleSubmitRole() {
 }
 
 async function handleSubmitPermission() {
+  if (!canManagePermissions.value) {
+    message.error("当前账号无权维护权限项。")
+    return
+  }
   if (!permissionForm.permission_code.trim()) {
     message.error("请输入权限编码。")
     return
@@ -1340,6 +1804,10 @@ async function handleSubmitPermission() {
 }
 
 async function handleSubmitDepartment() {
+  if (!canManageDepartments.value) {
+    message.error("当前账号无权维护组织架构。")
+    return
+  }
   if (!departmentForm.dept_code.trim()) {
     message.error("请输入部门编码。")
     return
@@ -1375,6 +1843,10 @@ async function handleSubmitDepartment() {
 }
 
 async function handleUnlockUser(userId: number) {
+  if (!canManageUsers.value) {
+    message.error("当前账号无权解锁账号。")
+    return
+  }
   unlockingUserId.value = userId
   try {
     const response = await unlockUser(userId)
@@ -1396,12 +1868,40 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
   message.error(fallbackMessage)
 }
 
-onMounted(() => {
-  if (!isSystemAdmin.value) {
+onMounted(async () => {
+  if (!canAccessSystemManagement.value) {
     return
   }
-  void loadPageData()
+  await loadPageData()
+  await consumeManagementRouteTarget()
 })
+
+watch(
+  visibleTabKeys,
+  (tabKeys) => {
+    if (!tabKeys.length) {
+      activeTab.value = "health"
+      return
+    }
+    if (!tabKeys.includes(activeTab.value)) {
+      activeTab.value = tabKeys[0]
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [route.query.tab, route.query.userId],
+  ([tab, userId], [oldTab, oldUserId]) => {
+    if (!canAccessSystemManagement.value) {
+      return
+    }
+    if ((!tab && !userId) || (tab === oldTab && userId === oldUserId)) {
+      return
+    }
+    void consumeManagementRouteTarget()
+  },
+)
 </script>
 
 <style scoped>
@@ -1438,6 +1938,14 @@ onMounted(() => {
   line-height: 1.2;
 }
 
+.panel-card :deep(.user-row-focused > td) {
+  background: rgba(230, 244, 255, 0.88) !important;
+}
+
+.panel-card :deep(.user-row-focused:hover > td) {
+  background: rgba(186, 224, 255, 0.92) !important;
+}
+
 .summary-card small {
   color: #475467;
   line-height: 1.7;
@@ -1471,6 +1979,12 @@ onMounted(() => {
 }
 
 .tab-toolbar {
+  margin-bottom: 18px;
+}
+
+.role-insight-stack {
+  display: grid;
+  gap: 18px;
   margin-bottom: 18px;
 }
 
@@ -1530,6 +2044,70 @@ onMounted(() => {
 
 .number-input {
   width: 100%;
+}
+
+.template-toolbar {
+  display: grid;
+  gap: 12px;
+}
+
+.template-select {
+  width: 100%;
+}
+
+.template-hint {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(10, 113, 82, 0.06);
+}
+
+.template-hint span,
+.template-hint small,
+.permission-summary small {
+  color: #667085;
+  line-height: 1.7;
+}
+
+.permission-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.permission-group-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  border-radius: 18px;
+  background: #ffffff;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.permission-group-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(10, 113, 82, 0.22);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+}
+
+.permission-group-card-active {
+  border-color: rgba(10, 113, 82, 0.36);
+  background: rgba(10, 113, 82, 0.08);
+}
+
+.permission-group-card span,
+.permission-group-card small {
+  color: #667085;
+}
+
+.permission-summary {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
 }
 
 @media (max-width: 960px) {

@@ -23,6 +23,19 @@ export interface OnShelfArchiveSetupResult {
 
 export interface DigitizedArchiveSetupResult extends OnShelfArchiveSetupResult {
   fileName: string
+  fileId: number
+  taskId: number
+  itemId: number
+}
+
+export interface DestroyApplicationSetupResult extends OnShelfArchiveSetupResult {
+  applicationId: number
+  applicationNo: string
+}
+
+export interface ArchiveViewerAccountResult {
+  username: string
+  password: string
 }
 
 interface PrepareOnShelfArchiveOptions {
@@ -44,11 +57,31 @@ interface ScanTaskDetailResponse {
   }>
 }
 
+interface DestroyApplicationResponse {
+  id: number
+  application_no: string
+}
+
 interface ArchiveDetailResponse {
   status: string
   files: Array<{
+    id: number
     file_name: string
     status: string
+  }>
+}
+
+interface UserListItem {
+  id: number
+  username: string
+  dept_id: number
+}
+
+interface RoleListItem {
+  id: number
+  role_code: string
+  permissions: Array<{
+    id: number
   }>
 }
 
@@ -120,7 +153,7 @@ async function waitForDigitizedFileReady(apiContext: APIRequestContext, archiveI
     const targetFile = archiveDetailPayload.data.files.find((item) => item.file_name === fileName)
 
     if (archiveDetailPayload.data.status === "PENDING_CATALOG" && targetFile?.status === "ACTIVE") {
-      return
+      return targetFile.id
     }
 
     await sleep(300)
@@ -134,16 +167,20 @@ export async function loginByUi(page: Page, username: string, password: string, 
     await page.goto("/login")
   } else {
     await page.goto(targetPath)
-    await page.waitForURL((url) => url.pathname === "/login" || url.pathname === targetPath, { timeout: 10000 })
   }
 
-  if (!page.url().includes("/login")) {
+  const loginButton = page.getByRole("button", { name: "登录系统" })
+
+  try {
+    await expect(loginButton).toBeVisible({ timeout: 5000 })
+  } catch {
+    await page.waitForURL((url) => url.pathname === targetPath, { timeout: 10000 })
     return
   }
 
   await page.getByPlaceholder("请输入用户名").fill(username)
   await page.getByPlaceholder("请输入密码").fill(password)
-  await page.getByRole("button", { name: "登录系统" }).click()
+  await loginButton.click()
   await page.waitForURL((url) => url.pathname !== "/login", { timeout: 10000 })
 }
 
@@ -260,7 +297,7 @@ export async function prepareDigitizedArchive(
     )
     expect(uploadResponse.ok()).toBeTruthy()
 
-    await waitForDigitizedFileReady(apiContext, archiveDraft.archiveId, fileName)
+    const fileId = await waitForDigitizedFileReady(apiContext, archiveDraft.archiveId, fileName)
 
     const transitionToShelfResponse = await apiContext.post(
       `archives/records/${archiveDraft.archiveId}/transition-status/`,
@@ -278,6 +315,144 @@ export async function prepareDigitizedArchive(
       archiveCode: archiveDraft.archiveCode,
       archiveTitle: archiveDraft.archiveTitle,
       fileName,
+      fileId,
+      taskId: scanTaskPayload.data.id,
+      itemId: scanTaskPayload.data.items[0].id,
+    }
+  } finally {
+    await apiContext.dispose()
+  }
+}
+
+export async function createLowClearanceArchiveViewer(): Promise<ArchiveViewerAccountResult> {
+  const adminApi = await createAuthorizedApiContext("admin", "Admin12345")
+  const password = "Viewer12345"
+  const uniqueSuffix = Date.now()
+  const username = `archive_viewer_${uniqueSuffix}`
+  const roleCode = `E2E_ARCHIVE_VIEWER_${uniqueSuffix}`
+
+  try {
+    const usersResponse = await adminApi.get("accounts/users/")
+    expect(usersResponse.ok()).toBeTruthy()
+    const usersPayload = await usersResponse.json() as ApiResponseShape<UserListItem[]>
+    const archivistUser = usersPayload.data.find((item) => item.username === "archivist")
+    if (!archivistUser) {
+      throw new Error("未找到档案员基础账号，无法创建低密级档案查看账号。")
+    }
+
+    const rolesResponse = await adminApi.get("accounts/roles/")
+    expect(rolesResponse.ok()).toBeTruthy()
+    const rolesPayload = await rolesResponse.json() as ApiResponseShape<RoleListItem[]>
+    const archivistRole = rolesPayload.data.find((item) => item.role_code === "ARCHIVIST")
+    if (!archivistRole) {
+      throw new Error("未找到档案员角色，无法创建低密级档案查看账号。")
+    }
+
+    const createRoleResponse = await adminApi.post("accounts/roles/", {
+      data: {
+        role_code: roleCode,
+        role_name: "E2E低密级档案查看员",
+        data_scope: "ALL",
+        status: true,
+        permission_ids: archivistRole.permissions.map((item) => item.id),
+      },
+    })
+    expect(createRoleResponse.ok()).toBeTruthy()
+    const createRolePayload = await createRoleResponse.json() as ApiResponseShape<{ id: number }>
+
+    const createUserResponse = await adminApi.post("accounts/users/", {
+      data: {
+        dept_id: archivistUser.dept_id,
+        username,
+        password,
+        real_name: "低密级档案查看员",
+        status: true,
+        role_ids: [createRolePayload.data.id],
+        security_clearance_level: "INTERNAL",
+        is_staff: true,
+      },
+    })
+    expect(createUserResponse.ok()).toBeTruthy()
+
+    return {
+      username,
+      password,
+    }
+  } finally {
+    await adminApi.dispose()
+  }
+}
+
+export async function prepareDestroyApplication(
+  options: PrepareOnShelfArchiveOptions & {
+    reason?: string
+    basis?: string
+  },
+): Promise<DestroyApplicationSetupResult> {
+  const apiContext = await createAuthorizedApiContext("archivist", "Archivist12345")
+
+  try {
+    const archiveDraft = await createArchiveDraft(apiContext, options)
+
+    const transitionToCatalogResponse = await apiContext.post(
+      `archives/records/${archiveDraft.archiveId}/transition-status/`,
+      {
+        data: {
+          next_status: "PENDING_CATALOG",
+          remark: "E2E 销毁流程流转到待编目",
+        },
+      },
+    )
+    expect(transitionToCatalogResponse.ok()).toBeTruthy()
+
+    const transitionToShelfResponse = await apiContext.post(
+      `archives/records/${archiveDraft.archiveId}/transition-status/`,
+      {
+        data: {
+          next_status: "ON_SHELF",
+          remark: "E2E 销毁流程流转到已上架",
+        },
+      },
+    )
+    expect(transitionToShelfResponse.ok()).toBeTruthy()
+
+    const destroyApplicationResponse = await apiContext.post("destruction/applications/", {
+      data: {
+        archive_id: archiveDraft.archiveId,
+        reason: options.reason || "E2E 销毁深链联调原因",
+        basis: options.basis || "E2E 销毁深链联调依据",
+      },
+    })
+    expect(destroyApplicationResponse.ok()).toBeTruthy()
+    const destroyApplicationPayload = await destroyApplicationResponse.json() as ApiResponseShape<DestroyApplicationResponse>
+
+    return {
+      archiveId: archiveDraft.archiveId,
+      archiveCode: archiveDraft.archiveCode,
+      archiveTitle: archiveDraft.archiveTitle,
+      applicationId: destroyApplicationPayload.data.id,
+      applicationNo: destroyApplicationPayload.data.application_no,
+    }
+  } finally {
+    await apiContext.dispose()
+  }
+}
+
+export async function triggerUserLock(username: string, failedPassword = "WrongPassword123") {
+  const apiContext = await playwrightRequest.newContext({
+    baseURL: BACKEND_API_BASE_URL,
+  })
+
+  try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await apiContext.post("auth/login/", {
+        data: {
+          username,
+          password: failedPassword,
+        },
+      })
+      const expectedStatus = attempt < 2 ? 400 : 423
+      expect(response.status()).toBe(expectedStatus)
     }
   } finally {
     await apiContext.dispose()

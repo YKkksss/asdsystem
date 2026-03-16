@@ -7,8 +7,8 @@ from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
 from apps.audit.models import AuditLog
-from apps.accounts.models import DataScope, Role, SecurityClearance
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveCodeType, ArchiveFile, ArchiveRecord, ArchiveStatus, ArchiveStorageLocation
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
@@ -66,6 +66,23 @@ class ArchiveApiTests(APITestCase):
             data_scope=DataScope.DEPT_AND_CHILD,
             status=True,
         )
+        self.archive_viewer_role = Role.objects.create(
+            role_code="ARCHIVE_VIEWER_SELF",
+            role_name="档案检索人员",
+            data_scope=DataScope.SELF,
+            status=True,
+        )
+        self.archive_center_permission = SystemPermission.objects.create(
+            permission_code="menu.archive_center",
+            permission_name="档案中心",
+            permission_type="MENU",
+            module_name="archives",
+            route_path="/archives/records",
+            sort_order=20,
+            status=True,
+        )
+        assign_permissions_to_role(self.dept_and_child_role, [self.archive_center_permission.id])
+        assign_permissions_to_role(self.archive_viewer_role, [self.archive_center_permission.id])
         self.user = User.objects.create_user(
             username="archivist",
             password="Archivist123",
@@ -82,7 +99,7 @@ class ArchiveApiTests(APITestCase):
             dept=self.department,
             security_clearance_level=SecurityClearance.INTERNAL,
         )
-        assign_roles_to_user(self.low_clearance_user, [self.borrower_role.id])
+        assign_roles_to_user(self.low_clearance_user, [self.borrower_role.id, self.archive_viewer_role.id])
         self.business_scope_user = User.objects.create_user(
             username="business_reader",
             password="BusinessReader12345",
@@ -90,7 +107,7 @@ class ArchiveApiTests(APITestCase):
             dept=self.business_department,
             security_clearance_level=SecurityClearance.TOP_SECRET,
         )
-        assign_roles_to_user(self.business_scope_user, [self.borrower_role.id])
+        assign_roles_to_user(self.business_scope_user, [self.borrower_role.id, self.archive_viewer_role.id])
         self.business_manager_user = User.objects.create_user(
             username="business_manager",
             password="BusinessManager12345",

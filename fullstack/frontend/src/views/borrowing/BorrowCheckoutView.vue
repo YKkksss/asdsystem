@@ -4,7 +4,7 @@
       v-if="!canManageArchives"
       show-icon
       type="warning"
-      message="当前账号不是管理员或档案员，不能办理出库登记。"
+      message="当前账号缺少出库登记权限，不能办理借阅出库。"
     />
 
     <template v-else>
@@ -100,21 +100,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import { message } from "ant-design-vue"
+import { useRoute, useRouter } from "vue-router"
 
 import {
   checkoutBorrowApplication,
+  fetchBorrowApplicationDetail,
   fetchBorrowApplicationsPage,
   type BorrowApplication,
 } from "@/api/borrowing"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 import { getRequestErrorMessage, getRequestErrorStatus } from "@/utils/request"
 
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 
 const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+  profileHasAnyPermission(authStore.profile, ["button.borrow.checkout"], ARCHIVE_MANAGER_FALLBACK_ROLES),
 )
 
 const columns = [
@@ -162,6 +167,45 @@ function openCheckoutModal(application: BorrowApplication) {
   selectedApplication.value = application
   checkoutNote.value = ""
   modalOpen.value = true
+}
+
+async function openCheckoutModalById(applicationId: number) {
+  if (!canManageArchives.value) {
+    message.warning("当前账号无权办理借阅出库。")
+    return
+  }
+
+  try {
+    const response = await fetchBorrowApplicationDetail(applicationId)
+    selectedApplication.value = response.data
+    checkoutNote.value = ""
+    modalOpen.value = true
+  } catch (error) {
+    const status = getRequestErrorStatus(error)
+    if (status === 404) {
+      message.error("借阅申请不存在或状态已变化，请刷新列表后重试。")
+      await loadApplications()
+      return
+    }
+    if (status === 403) {
+      message.error("当前账号无权办理该借阅出库。")
+      return
+    }
+    handleRequestError(error, "加载借阅出库详情失败。")
+  }
+}
+
+async function consumeRouteApplicationId() {
+  const rawApplicationId = route.query.applicationId
+  const applicationId = Number(rawApplicationId)
+  if (!Number.isInteger(applicationId) || applicationId <= 0) {
+    return
+  }
+
+  await openCheckoutModalById(applicationId)
+  const nextQuery = { ...route.query }
+  delete nextQuery.applicationId
+  await router.replace({ query: nextQuery })
 }
 
 function handleApplyFilters() {
@@ -250,6 +294,14 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 onMounted(() => {
   void loadApplications()
 })
+
+watch(
+  () => route.query.applicationId,
+  () => {
+    void consumeRouteApplicationId()
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>

@@ -1,11 +1,12 @@
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import DataScope, Role, SecurityClearance
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveRecord, ArchiveStatus
 from apps.audit.models import AuditLog
 from apps.borrowing.models import BorrowApplication, BorrowApplicationStatus
+from apps.notifications.models import NotificationType, SystemNotification
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
 
@@ -56,6 +57,22 @@ class ReportsApiTests(APITestCase):
             data_scope=DataScope.SELF,
             status=True,
         )
+        self.report_menu_permission = SystemPermission.objects.create(
+            permission_code="menu.report_center",
+            permission_name="报表中心",
+            permission_type="MENU",
+            module_name="reports",
+            route_path="/reports/center",
+            sort_order=110,
+            status=True,
+        )
+        self.report_permission_role = Role.objects.create(
+            role_code="REPORT_VIEWER_PERMISSION",
+            role_name="报表查看权限角色",
+            data_scope=DataScope.ALL,
+            status=True,
+        )
+        assign_permissions_to_role(self.report_permission_role, [self.report_menu_permission.id])
 
         self.admin_user = User.objects.create_user(
             username="report_admin",
@@ -91,6 +108,14 @@ class ReportsApiTests(APITestCase):
             dept=self.business_department,
         )
         assign_roles_to_user(self.borrower_user, [self.borrower_role.id])
+        self.report_permission_user = User.objects.create_user(
+            username="report_permission_user",
+            password="ReportPermission12345",
+            real_name="权限报表查看人",
+            dept=self.root_department,
+            is_staff=True,
+        )
+        assign_roles_to_user(self.report_permission_user, [self.report_permission_role.id])
 
         self.archive_a = ArchiveRecord.objects.create(
             archive_code="A2026-R001",
@@ -197,8 +222,23 @@ class ReportsApiTests(APITestCase):
         self.assertTrue(
             AuditLog.objects.filter(module_name="REPORTS", action_code="REPORT_EXPORT", username="report_admin").exists()
         )
+        export_notification = SystemNotification.objects.filter(
+            user=self.admin_user,
+            notification_type=NotificationType.SYSTEM,
+            title="报表导出已完成",
+            biz_type="report_export",
+        ).first()
+        self.assertIsNotNone(export_notification)
+        self.assertIn("报表中心", export_notification.content)
 
     def test_borrower_should_not_view_reports(self) -> None:
         self.client.force_authenticate(self.borrower_user)
         response = self.client.get("/api/v1/reports/summary/")
         self.assertEqual(response.status_code, 403)
+
+    def test_user_with_report_menu_permission_should_view_reports(self) -> None:
+        self.client.force_authenticate(self.report_permission_user)
+
+        response = self.client.get("/api/v1/reports/summary/")
+
+        self.assertEqual(response.status_code, 200)

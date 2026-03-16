@@ -68,7 +68,7 @@
         />
 
         <a-select
-          v-if="canManageArchives"
+          v-if="canManageLocations"
           v-model:value="filters.location_id"
           allow-clear
           class="toolbar-select"
@@ -87,12 +87,12 @@
           <a-button @click="loadArchives">刷新</a-button>
         </a-space>
 
-        <a-space v-if="canManageArchives" wrap>
-          <span class="selection-hint">已选 {{ selectedArchiveIds.length }} 条</span>
-          <a-button :disabled="!selectedArchiveIds.length" @click="handleBatchPrint">
+        <a-space v-if="canPrintArchives || canCreateArchives" wrap>
+          <span v-if="canPrintArchives" class="selection-hint">已选 {{ selectedArchiveIds.length }} 条</span>
+          <a-button v-if="canPrintArchives" :disabled="!selectedArchiveIds.length" @click="handleBatchPrint">
             批量打印
           </a-button>
-          <RouterLink to="/archives/records/create">
+          <RouterLink v-if="canCreateArchives" to="/archives/records/create">
             <a-button type="primary">新建档案</a-button>
           </RouterLink>
         </a-space>
@@ -152,18 +152,18 @@
           <template v-else-if="column.key === 'actions'">
             <a-space wrap>
               <a-button type="link" @click="openDetail(record.id)">查看详情</a-button>
-              <a-button v-if="canManageArchives" type="link" @click="openEdit(record.id)">
+              <a-button v-if="canEditArchives" type="link" @click="openEdit(record.id)">
                 编辑
               </a-button>
               <a-button
-                v-if="canManageArchives"
+                v-if="canGenerateArchiveCodes"
                 :loading="actionLoadingId === record.id"
                 type="link"
                 @click="handleGenerateCodes(record.id)"
               >
                 生成码
               </a-button>
-              <a-button v-if="canManageArchives" type="link" @click="openPrintPage([record.id])">
+              <a-button v-if="canPrintArchives" type="link" @click="openPrintPage([record.id])">
                 打印
               </a-button>
             </a-space>
@@ -213,7 +213,7 @@
             </a-descriptions-item>
           </a-descriptions>
 
-          <a-card v-if="canManageArchives" class="detail-block" size="small" title="状态流转">
+          <a-card v-if="canTransitionArchives" class="detail-block" size="small" title="状态流转">
             <a-alert
               show-icon
               type="info"
@@ -250,7 +250,7 @@
           <a-card class="detail-block" size="small" title="条码与二维码">
             <template #extra>
               <a-button
-                v-if="canManageArchives"
+                v-if="canPrintArchives"
                 type="primary"
                 :disabled="!selectedArchive.barcodes.length"
                 @click="openPrintPage([selectedArchive.id])"
@@ -287,7 +287,13 @@
             />
             <template v-if="selectedArchive.files.length && !selectedArchive.masked_fields.includes('files')">
               <div class="file-grid">
-                <article v-for="file in selectedArchive.files" :key="file.id" class="file-card">
+                <article
+                  v-for="file in selectedArchive.files"
+                  :key="file.id"
+                  class="file-card"
+                  :class="{ 'file-card-focused': file.id === focusedFileId }"
+                  :data-file-id="file.id"
+                >
                   <div class="file-card-header">
                     <strong>{{ file.file_name }}</strong>
                     <a-tag :color="file.status === 'ACTIVE' ? 'green' : file.status === 'FAILED' ? 'red' : 'blue'">
@@ -407,10 +413,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue"
 import { message } from "ant-design-vue"
 import type { SelectProps } from "ant-design-vue"
-import { RouterLink, useRouter } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 
 import {
   buildArchiveAccessUrl,
@@ -429,8 +435,10 @@ import {
 } from "@/api/archives"
 import { fetchDepartments } from "@/api/organizations"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 
 const authStore = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 
 const statusLabelMap: Record<string, string> = {
@@ -494,8 +502,32 @@ const columns = [
   { title: "操作", key: "actions", width: 280, fixed: "right" as const },
 ]
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const canCreateArchives = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.create"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+
+const canEditArchives = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.edit"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+
+const canTransitionArchives = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.transition"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+
+const canGenerateArchiveCodes = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.generate_code"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+
+const canPrintArchives = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.print"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+
+const canManageLocations = computed(() =>
+  profileHasAnyPermission(
+    authStore.profile,
+    ["button.location.manage", "menu.archive_location"],
+    ARCHIVE_MANAGER_FALLBACK_ROLES,
+  ),
 )
 
 const loading = ref(false)
@@ -513,6 +545,7 @@ const archives = ref<ArchiveRecord[]>([])
 const selectedArchiveIds = ref<number[]>([])
 const selectedArchive = ref<ArchiveRecordDetail | null>(null)
 const selectedFileForAccess = ref<ArchiveFile | null>(null)
+const focusedFileId = ref<number | null>(null)
 const departmentOptions = ref<SelectProps["options"]>([])
 const locationOptions = ref<SelectProps["options"]>([])
 const previewSource = ref("")
@@ -562,7 +595,7 @@ const summaryCards = computed(() => {
 })
 
 const rowSelection = computed(() => {
-  if (!canManageArchives.value) {
+  if (!canPrintArchives.value) {
     return undefined
   }
 
@@ -661,12 +694,45 @@ function handleArchiveTableChange(page: number, pageSize: number) {
   void loadArchives()
 }
 
+function resolveArchiveRouteTarget() {
+  const rawArchiveId = route.query.archiveId
+  const archiveId = Number(rawArchiveId)
+  if (!Number.isInteger(archiveId) || archiveId <= 0) {
+    return null
+  }
+
+  const rawFileId = route.query.fileId
+  const fileId = Number(rawFileId)
+  return {
+    archiveId,
+    fileId: Number.isInteger(fileId) && fileId > 0 ? fileId : null,
+  }
+}
+
+async function clearArchiveRouteTarget() {
+  if (!route.query.archiveId && !route.query.fileId) {
+    return
+  }
+  const nextQuery = { ...route.query }
+  delete nextQuery.archiveId
+  delete nextQuery.fileId
+  await router.replace({ query: nextQuery })
+}
+
+async function scrollToFocusedFile() {
+  await nextTick()
+  window.setTimeout(() => {
+    const element = document.querySelector<HTMLElement>(`.file-card[data-file-id="${focusedFileId.value}"]`)
+    element?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, 80)
+}
+
 async function loadFilterOptions() {
   optionsLoading.value = true
   try {
     const [departmentsResponse, locationsResponse] = await Promise.all([
       fetchDepartments(),
-      canManageArchives.value ? fetchArchiveLocations() : Promise.resolve({ data: [] }),
+      canManageLocations.value ? fetchArchiveLocations() : Promise.resolve({ data: [] }),
     ])
     departmentOptions.value = departmentsResponse.data.map((item) => ({
       value: item.id,
@@ -694,7 +760,7 @@ async function loadArchives() {
       security_level: filters.security_level || undefined,
       status: filters.status || undefined,
       responsible_dept_id: filters.responsible_dept_id || undefined,
-      location_id: canManageArchives.value ? filters.location_id || undefined : undefined,
+      location_id: canManageLocations.value ? filters.location_id || undefined : undefined,
       page: archivePagination.current,
       page_size: archivePagination.pageSize,
     })
@@ -712,13 +778,17 @@ async function loadArchives() {
   }
 }
 
-async function openDetail(archiveId: number) {
+async function openDetail(archiveId: number, options?: { focusedFileId?: number | null }) {
   detailOpen.value = true
   detailLoading.value = true
+  focusedFileId.value = options?.focusedFileId ?? null
   resetTransitionForm()
   try {
     const response = await fetchArchiveDetail(archiveId)
     selectedArchive.value = response.data
+    if (focusedFileId.value) {
+      await scrollToFocusedFile()
+    }
   } catch (error) {
     handleRequestError(error, "加载档案详情失败。")
   } finally {
@@ -726,11 +796,30 @@ async function openDetail(archiveId: number) {
   }
 }
 
+async function consumeRouteArchiveTarget() {
+  const target = resolveArchiveRouteTarget()
+  if (!target) {
+    return
+  }
+
+  await openDetail(target.archiveId, { focusedFileId: target.fileId })
+  await clearArchiveRouteTarget()
+}
+
 function openEdit(archiveId: number) {
+  if (!canEditArchives.value) {
+    message.warning("当前账号无权编辑档案主数据。")
+    return
+  }
   void router.push(`/archives/records/${archiveId}/edit`)
 }
 
 function openPrintPage(archiveIds: number[]) {
+  if (!canPrintArchives.value) {
+    message.warning("当前账号无权打印档案标签。")
+    return
+  }
+
   const resolvedArchiveIds = [...new Set(archiveIds)]
     .map((archiveId) => Number(archiveId))
     .filter((archiveId) => Number.isInteger(archiveId) && archiveId > 0)
@@ -757,6 +846,11 @@ function handleBatchPrint() {
 }
 
 async function handleGenerateCodes(archiveId: number) {
+  if (!canGenerateArchiveCodes.value) {
+    message.warning("当前账号无权生成档案条码。")
+    return
+  }
+
   actionLoadingId.value = archiveId
   try {
     const response = await generateArchiveCodes(archiveId)
@@ -772,6 +866,11 @@ async function handleGenerateCodes(archiveId: number) {
 }
 
 async function handleTransitionStatus() {
+  if (!canTransitionArchives.value) {
+    message.warning("当前账号无权流转档案状态。")
+    return
+  }
+
   if (!selectedArchive.value || !transitionForm.next_status) {
     message.warning("请先选择目标状态。")
     return
@@ -870,6 +969,14 @@ onMounted(() => {
   void loadArchives()
   void loadFilterOptions()
 })
+
+watch(
+  () => [route.query.archiveId, route.query.fileId],
+  () => {
+    void consumeRouteArchiveTarget()
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -993,6 +1100,11 @@ onMounted(() => {
   padding: 16px;
   border: 1px solid rgba(10, 113, 82, 0.12);
   border-radius: 18px;
+}
+
+.file-card-focused {
+  border-color: rgba(22, 119, 255, 0.42);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
 }
 
 .barcode-image :deep(img),

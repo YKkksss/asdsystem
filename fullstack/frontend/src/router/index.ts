@@ -1,20 +1,30 @@
 import { createRouter, createWebHistory, type RouteLocationNormalized } from "vue-router"
 
 import { readStoredProfile } from "@/utils/session"
+import {
+  ALL_FALLBACK_ROLES,
+  ARCHIVE_CENTER_FALLBACK_ROLES,
+  ARCHIVE_MANAGER_FALLBACK_ROLES,
+  AUDIT_VIEW_FALLBACK_ROLES,
+  BORROW_CENTER_FALLBACK_ROLES,
+  BORROW_RETURN_FALLBACK_ROLES,
+  DESTRUCTION_VIEW_FALLBACK_ROLES,
+  NOTIFICATION_FALLBACK_ROLES,
+  REPORT_VIEW_FALLBACK_ROLES,
+  SYSTEM_MANAGER_FALLBACK_ROLES,
+  profileHasAccess,
+} from "@/utils/access"
 
 const ROUTE_ACCESS_NOTICE_KEY = "asd_system_route_access_notice"
 
 const ACCESS_TOKEN_KEY = "asd_system_access_token"
-const MANAGE_ARCHIVE_ROLE_CODES = ["ADMIN", "ARCHIVIST"] as const
-const REPORT_VIEW_ROLE_CODES = ["ADMIN", "AUDITOR", "ARCHIVIST"] as const
-const AUDIT_VIEW_ROLE_CODES = ["ADMIN", "AUDITOR"] as const
-const SYSTEM_MANAGE_ROLE_CODES = ["ADMIN"] as const
-
-type RoleCode = typeof MANAGE_ARCHIVE_ROLE_CODES[number] | typeof REPORT_VIEW_ROLE_CODES[number]
 
 interface StoredProfile {
   roles: Array<{
     role_code: string
+  }>
+  permissions: Array<{
+    permission_code: string
   }>
 }
 
@@ -22,24 +32,26 @@ function storeRouteAccessNotice(message: string) {
   window.sessionStorage.setItem(ROUTE_ACCESS_NOTICE_KEY, message)
 }
 
-function getRouteRequiredRoles(to: RouteLocationNormalized) {
+function getRoutePermissionCodes(to: RouteLocationNormalized) {
   const matchedRecord = [...to.matched]
     .reverse()
-    .find((record) => Array.isArray(record.meta.allowedRoles) && record.meta.allowedRoles.length)
-  return (matchedRecord?.meta.allowedRoles as RoleCode[] | undefined) || []
+    .find((record) => Array.isArray(record.meta.permissionCodes) && record.meta.permissionCodes.length)
+  return (matchedRecord?.meta.permissionCodes as string[] | undefined) || []
 }
 
-function userHasAnyRequiredRole(requiredRoles: readonly string[]) {
-  if (!requiredRoles.length) {
-    return true
-  }
+function getRouteFallbackRoles(to: RouteLocationNormalized) {
+  const matchedRecord = [...to.matched]
+    .reverse()
+    .find((record) => Array.isArray(record.meta.fallbackRoles) && record.meta.fallbackRoles.length)
+  return (matchedRecord?.meta.fallbackRoles as string[] | undefined) || []
+}
 
+function userCanAccessRoute(permissionCodes: readonly string[], fallbackRoles: readonly string[]) {
   const profile = readStoredProfile<StoredProfile>()
   if (!profile) {
-    return true
+    return false
   }
-
-  return profile.roles.some((role) => requiredRoles.includes(role.role_code))
+  return profileHasAccess(profile, { permissionCodes, fallbackRoles })
 }
 
 const router = createRouter({
@@ -61,7 +73,8 @@ const router = createRouter({
       meta: {
         title: "档案标签打印",
         description: "按选中的档案生成打印版面，并统一写入打印留痕。",
-        allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+        permissionCodes: ["button.archive.print"],
+        fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
       },
     },
     {
@@ -74,7 +87,9 @@ const router = createRouter({
           component: () => import("@/views/dashboard/DashboardView.vue"),
           meta: {
             title: "工作台",
-            description: "查看当前已交付模块、开发阶段和后续业务推进顺序。",
+            description: "查看待办、统计概览、快捷入口和业务提醒。",
+            permissionCodes: ["menu.dashboard"],
+            fallbackRoles: ALL_FALLBACK_ROLES,
           },
         },
         {
@@ -82,8 +97,10 @@ const router = createRouter({
           name: "archive-record-list",
           component: () => import("@/views/archives/ArchiveListView.vue"),
           meta: {
-            title: "档案检索",
-            description: "按关键词与多字段组合检索档案，并查看脱敏后的详情结果。",
+            title: "档案中心",
+            description: "检索档案，并从详情继续编辑、流转、打印和文件访问。",
+            permissionCodes: ["menu.archive_center"],
+            fallbackRoles: ARCHIVE_CENTER_FALLBACK_ROLES,
           },
         },
         {
@@ -93,7 +110,8 @@ const router = createRouter({
           meta: {
             title: "新建档案",
             description: "录入档号、题名、年度、保管期限、密级及基础编目信息。",
-            allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+            permissionCodes: ["button.archive.create"],
+            fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -103,7 +121,8 @@ const router = createRouter({
           meta: {
             title: "编辑档案",
             description: "更新档案主数据，并自动写入修订记录。",
-            allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+            permissionCodes: ["button.archive.edit"],
+            fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -113,7 +132,8 @@ const router = createRouter({
           meta: {
             title: "实体位置",
             description: "维护库房、区、柜、架、层、盒的标准化实体定位信息。",
-            allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+            permissionCodes: ["menu.archive_location"],
+            fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -123,7 +143,8 @@ const router = createRouter({
           meta: {
             title: "扫描任务",
             description: "管理扫描任务、任务明细、执行人分配和数字化进度。",
-            allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+            permissionCodes: ["menu.scan_task"],
+            fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -133,7 +154,8 @@ const router = createRouter({
           meta: {
             title: "任务详情",
             description: "上传 PDF 或图片文件，生成缩略图并完成档案绑定。",
-            allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+            permissionCodes: ["menu.scan_task"],
+            fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -141,8 +163,10 @@ const router = createRouter({
           name: "borrow-application-list",
           component: () => import("@/views/borrowing/BorrowApplicationListView.vue"),
           meta: {
-            title: "借阅申请",
+            title: "借阅中心",
             description: "提交借阅申请，并查看本人或授权范围内的借阅流转记录。",
+            permissionCodes: ["menu.borrow_center"],
+            fallbackRoles: BORROW_CENTER_FALLBACK_ROLES,
           },
         },
         {
@@ -152,6 +176,8 @@ const router = createRouter({
           meta: {
             title: "借阅审批",
             description: "处理当前用户待审批的借阅申请，并填写审批意见。",
+            permissionCodes: ["menu.borrow_approval"],
+            fallbackRoles: SYSTEM_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -161,7 +187,8 @@ const router = createRouter({
           meta: {
             title: "出库登记",
             description: "对审批通过的借阅申请办理实体档案出库登记。",
-            allowedRoles: [...MANAGE_ARCHIVE_ROLE_CODES],
+            permissionCodes: ["menu.borrow_checkout"],
+            fallbackRoles: ARCHIVE_MANAGER_FALLBACK_ROLES,
           },
         },
         {
@@ -171,6 +198,8 @@ const router = createRouter({
           meta: {
             title: "归还中心",
             description: "提交归还凭证，并处理档案员归还验收与重新入库。",
+            permissionCodes: ["menu.borrow_return"],
+            fallbackRoles: BORROW_RETURN_FALLBACK_ROLES,
           },
         },
         {
@@ -180,6 +209,8 @@ const router = createRouter({
           meta: {
             title: "通知中心",
             description: "查看借阅催还、审批流转和系统消息，并执行已读处理。",
+            permissionCodes: ["menu.notification_center"],
+            fallbackRoles: NOTIFICATION_FALLBACK_ROLES,
           },
         },
         {
@@ -189,7 +220,8 @@ const router = createRouter({
           meta: {
             title: "销毁中心",
             description: "处理档案销毁申请、管理员审批、执行登记与附件留痕。",
-            allowedRoles: [...REPORT_VIEW_ROLE_CODES],
+            permissionCodes: ["menu.destruction_center"],
+            fallbackRoles: DESTRUCTION_VIEW_FALLBACK_ROLES,
           },
         },
         {
@@ -199,7 +231,8 @@ const router = createRouter({
           meta: {
             title: "审计日志",
             description: "查看关键业务操作留痕、异常结果和文件访问风控记录。",
-            allowedRoles: [...AUDIT_VIEW_ROLE_CODES],
+            permissionCodes: ["menu.audit_log"],
+            fallbackRoles: AUDIT_VIEW_FALLBACK_ROLES,
           },
         },
         {
@@ -209,7 +242,8 @@ const router = createRouter({
           meta: {
             title: "报表中心",
             description: "查看借阅汇总、部门排行、档案利用率并导出统计报表。",
-            allowedRoles: [...REPORT_VIEW_ROLE_CODES],
+            permissionCodes: ["menu.report_center"],
+            fallbackRoles: REPORT_VIEW_FALLBACK_ROLES,
           },
         },
         {
@@ -219,7 +253,8 @@ const router = createRouter({
           meta: {
             title: "系统管理",
             description: "集中维护用户、角色、组织架构与后端健康状态。",
-            allowedRoles: [...SYSTEM_MANAGE_ROLE_CODES],
+            permissionCodes: ["menu.system_management"],
+            fallbackRoles: SYSTEM_MANAGER_FALLBACK_ROLES,
           },
         },
       ],
@@ -250,8 +285,9 @@ router.beforeEach((to) => {
     return { name: "dashboard" }
   }
 
-  const requiredRoles = getRouteRequiredRoles(to)
-  if (token && requiredRoles.length && !userHasAnyRequiredRole(requiredRoles)) {
+  const permissionCodes = getRoutePermissionCodes(to)
+  const fallbackRoles = getRouteFallbackRoles(to)
+  if (token && permissionCodes.length && !userCanAccessRoute(permissionCodes, fallbackRoles)) {
     storeRouteAccessNotice(`当前账号无权访问“${String(to.meta.title || "目标页面")}”，已为你返回工作台。`)
     return { name: "dashboard" }
   }

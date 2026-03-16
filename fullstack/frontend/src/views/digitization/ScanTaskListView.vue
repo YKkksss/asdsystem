@@ -1,6 +1,6 @@
 <template>
   <section class="scan-page">
-    <template v-if="canManageArchives">
+    <template v-if="canViewScanTasks">
       <div class="summary-grid">
         <a-card v-for="item in summaryCards" :key="item.label" :bordered="false" class="summary-card">
           <span>{{ item.label }}</span>
@@ -10,7 +10,7 @@
       </div>
 
       <a-row :gutter="[20, 20]">
-        <a-col :xs="24" :xl="15">
+        <a-col :xs="24" :xl="canManageScanTasks ? 15 : 24">
           <a-card :bordered="false" class="panel-card">
             <div class="toolbar">
               <a-button @click="loadTasks">刷新任务</a-button>
@@ -64,7 +64,7 @@
           </a-card>
         </a-col>
 
-        <a-col :xs="24" :xl="9">
+        <a-col v-if="canManageScanTasks" :xs="24" :xl="9">
           <a-card :bordered="false" class="panel-card">
             <template #title>新建扫描任务</template>
 
@@ -115,8 +115,8 @@
     <a-result
       v-else
       status="403"
-      title="仅档案管理员可维护扫描任务"
-      sub-title="请使用管理员或档案员账号登录，或返回档案检索页查看已授权数据。"
+      title="仅具备数字化任务权限的账号可维护扫描任务"
+      sub-title="请联系管理员分配数字化任务权限，或返回档案检索页查看当前已授权数据。"
     >
       <template #extra>
         <RouterLink to="/archives/records">
@@ -142,12 +142,21 @@ import {
   type ScanTask,
 } from "@/api/digitization"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const canViewScanTasks = computed(() =>
+  profileHasAnyPermission(
+    authStore.profile,
+    ["menu.scan_task", "button.scan_task.manage"],
+    ARCHIVE_MANAGER_FALLBACK_ROLES,
+  ),
+)
+
+const canManageScanTasks = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.scan_task.manage"], ARCHIVE_MANAGER_FALLBACK_ROLES),
 )
 
 const statusLabelMap: Record<string, string> = {
@@ -243,6 +252,12 @@ async function loadTasks() {
 }
 
 async function loadOptions() {
+  if (!canManageScanTasks.value) {
+    assigneeOptions.value = []
+    archiveOptions.value = []
+    return
+  }
+
   optionsLoading.value = true
   try {
     const [assigneesResponse, archivesResponse] = await Promise.all([
@@ -267,6 +282,11 @@ async function loadOptions() {
 }
 
 async function handleCreateTask() {
+  if (!canManageScanTasks.value) {
+    message.warning("当前账号无权创建扫描任务。")
+    return
+  }
+
   submitting.value = true
   try {
     const response = await createScanTask({
@@ -301,9 +321,9 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 }
 
 watch(
-  canManageArchives,
-  (canManage) => {
-    if (!canManage) {
+  canViewScanTasks,
+  (canView) => {
+    if (!canView) {
       tasks.value = []
       assigneeOptions.value = []
       archiveOptions.value = []
@@ -311,7 +331,9 @@ watch(
       return
     }
     void loadTasks()
-    void loadOptions()
+    if (canManageScanTasks.value) {
+      void loadOptions()
+    }
   },
   { immediate: true },
 )

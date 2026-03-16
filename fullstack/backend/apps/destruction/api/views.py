@@ -1,9 +1,8 @@
 from django.db.models import Q
 from rest_framework import decorators, mixins, status, viewsets
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
 
-from apps.common.permissions import IsArchiveManager, IsSystemAdmin
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.destruction.api.serializers import (
@@ -15,6 +14,14 @@ from apps.destruction.api.serializers import (
 )
 from apps.destruction.models import DestroyApplication, DestroyApplicationStatus
 from apps.destruction.services import is_admin_or_auditor_user, is_archive_manager_user
+
+DESTROY_READ_PERMISSION_CODES = {"menu.destruction_center"}
+DESTROY_CREATE_PERMISSION_CODES = {"button.destruction.create"}
+DESTROY_APPROVE_PERMISSION_CODES = {"button.destruction.approve"}
+DESTROY_EXECUTE_PERMISSION_CODES = {"button.destruction.execute"}
+DESTROY_READ_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
+DESTROY_ARCHIVE_MANAGER_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
+DESTROY_APPROVE_FALLBACK_ROLES = {"ADMIN"}
 
 
 class DestroyApplicationViewSet(
@@ -33,17 +40,21 @@ class DestroyApplicationViewSet(
     search_fields = ["application_no", "reason", "basis", "archive__archive_code", "archive__title", "applicant__real_name"]
     ordering_fields = ["id", "created_at", "submitted_at", "approved_at", "executed_at"]
     filterset_fields = ["status", "archive_id", "applicant_id", "applicant_dept_id", "current_approver_id"]
-
-    def get_permissions(self):
-        if self.action == "create":
-            permission_classes = [IsArchiveManager]
-        elif self.action == "approve":
-            permission_classes = [IsSystemAdmin]
-        elif self.action == "execute":
-            permission_classes = [IsArchiveManager]
-        else:
-            permission_classes = [IsAuthenticated]
-        return [permission() for permission in permission_classes]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": DESTROY_READ_PERMISSION_CODES,
+        "retrieve": DESTROY_READ_PERMISSION_CODES,
+        "create": DESTROY_CREATE_PERMISSION_CODES,
+        "approve": DESTROY_APPROVE_PERMISSION_CODES,
+        "execute": DESTROY_EXECUTE_PERMISSION_CODES,
+    }
+    action_permission_fallback_roles = {
+        "list": DESTROY_READ_FALLBACK_ROLES,
+        "retrieve": DESTROY_READ_FALLBACK_ROLES,
+        "create": DESTROY_ARCHIVE_MANAGER_FALLBACK_ROLES,
+        "approve": DESTROY_APPROVE_FALLBACK_ROLES,
+        "execute": DESTROY_ARCHIVE_MANAGER_FALLBACK_ROLES,
+    }
 
     def get_serializer_class(self):
         if self.action == "create":

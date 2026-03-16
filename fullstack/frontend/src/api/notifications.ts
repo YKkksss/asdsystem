@@ -16,12 +16,19 @@ export interface SystemNotification {
   read_at: string | null
   created_at: string
   updated_at: string
+  route_path: string
 }
 
 export interface NotificationSummary {
   total_count: number
   unread_count: number
   reminder_unread_count: number
+}
+
+export interface NotificationPosition {
+  page: number
+  page_size: number
+  row_index: number
 }
 
 export interface NotificationQueryParams {
@@ -62,6 +69,18 @@ export async function markNotificationAsRead(notificationId: number) {
 export async function markAllNotificationsAsRead() {
   const response = await http.post<ApiResponse<{ updated_count: number }>>(
     "/notifications/messages/mark-all-read/",
+  )
+  return response.data
+}
+
+export async function fetchNotificationPosition(notificationId: number, pageSize: number) {
+  const response = await http.get<ApiResponse<NotificationPosition>>(
+    `/notifications/messages/${notificationId}/position/`,
+    {
+      params: {
+        page_size: pageSize,
+      },
+    },
   )
   return response.data
 }

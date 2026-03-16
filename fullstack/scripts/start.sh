@@ -34,12 +34,29 @@ start_frontend() {
     exit 1
   fi
 
+  local frontend_host="${ASD_FRONTEND_DEV_HOST:-0.0.0.0}"
+  local frontend_port="${ASD_FRONTEND_DEV_PORT:-5173}"
+  local allowed_hosts="${ASD_FRONTEND_ALLOWED_HOSTS:-*}"
+  local public_host="${1:-${ASD_FRONTEND_PUBLIC_HOST:-}}"
+
   echo "正在启动前端开发服务..."
   echo "目录：${FRONTEND_DIR}"
-  echo "本机访问：http://127.0.0.1:5173"
-  echo "内网访问：http://服务器内网IP:5173"
+  echo "监听地址：http://${frontend_host}:${frontend_port}"
+  echo "本机访问：http://127.0.0.1:${frontend_port}"
+  echo "内网访问：http://服务器内网IP:${frontend_port}"
+  if [ -n "${public_host}" ]; then
+    echo "公网访问：http://${public_host}:${frontend_port}"
+  else
+    echo "公网访问：http://服务器公网IP或域名:${frontend_port}"
+  fi
+  echo "允许访问主机：${allowed_hosts}"
   cd "${FRONTEND_DIR}"
-  exec npm run dev
+  exec env \
+    ASD_FRONTEND_DEV_HOST="${frontend_host}" \
+    ASD_FRONTEND_DEV_PORT="${frontend_port}" \
+    ASD_FRONTEND_ALLOWED_HOSTS="${allowed_hosts}" \
+    ASD_FRONTEND_PUBLIC_HOST="${public_host}" \
+    npm run dev
 }
 
 start_backend() {
@@ -108,7 +125,7 @@ main() {
 
   case "${choice}" in
     1)
-      start_frontend
+      start_frontend "${2:-}"
       ;;
     2)
       start_backend
@@ -126,4 +143,4 @@ main() {
   esac
 }
 
-main "${1:-}"
+main "$@"

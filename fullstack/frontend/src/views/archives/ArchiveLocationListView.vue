@@ -115,8 +115,8 @@
     <a-result
       v-else
       status="403"
-      title="仅档案管理员可维护实体位置"
-      sub-title="请使用管理员或档案员账号登录，或返回档案检索页查看已授权数据。"
+      title="仅具备实体位置维护权限的账号可维护实体位置"
+      sub-title="请联系管理员分配位置维护权限，或返回档案检索页查看当前已授权数据。"
     >
       <template #extra>
         <RouterLink to="/archives/records">
@@ -140,6 +140,7 @@ import {
   type ArchiveStorageLocation,
 } from "@/api/archives"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 
 const columns = [
   { title: "完整位置编码", key: "full_location_code" },
@@ -160,7 +161,11 @@ const editingLocationId = ref<number | null>(null)
 const editingLocationSnapshot = ref<ArchiveStorageLocation | null>(null)
 
 const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+  profileHasAnyPermission(
+    authStore.profile,
+    ["button.location.manage", "menu.archive_location"],
+    ARCHIVE_MANAGER_FALLBACK_ROLES,
+  ),
 )
 
 const isEditMode = computed(() => editingLocationId.value !== null)

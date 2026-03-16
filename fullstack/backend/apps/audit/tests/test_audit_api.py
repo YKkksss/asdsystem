@@ -1,8 +1,8 @@
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import DataScope, Role
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.audit.models import AuditLog
 from apps.audit.services import record_audit_log
 from apps.organizations.models import Department
@@ -36,6 +36,21 @@ class AuditApiTests(APITestCase):
             role_name="借阅人",
             data_scope=DataScope.SELF,
         )
+        self.audit_menu_permission = SystemPermission.objects.create(
+            permission_code="menu.audit_log",
+            permission_name="审计日志",
+            permission_type="MENU",
+            module_name="audit",
+            route_path="/audit/logs",
+            sort_order=120,
+            status=True,
+        )
+        self.audit_permission_role = Role.objects.create(
+            role_code="AUDIT_VIEWER_PERMISSION",
+            role_name="审计查看权限角色",
+            data_scope=DataScope.ALL,
+        )
+        assign_permissions_to_role(self.audit_permission_role, [self.audit_menu_permission.id])
 
         self.admin_user = User.objects.create_user(
             username="audit_admin",
@@ -62,6 +77,14 @@ class AuditApiTests(APITestCase):
             dept=self.department,
         )
         assign_roles_to_user(self.borrower_user, [self.borrower_role.id])
+        self.audit_permission_user = User.objects.create_user(
+            username="audit_permission_user",
+            password="AuditPermission12345",
+            real_name="权限审计查看人",
+            dept=self.department,
+            is_staff=True,
+        )
+        assign_roles_to_user(self.audit_permission_user, [self.audit_permission_role.id])
 
         record_audit_log(
             module_name="ARCHIVES",
@@ -123,3 +146,12 @@ class AuditApiTests(APITestCase):
         self.assertEqual(response.json()["data"]["pagination"]["total"], 5)
         self.assertEqual(response.json()["data"]["pagination"]["total_pages"], 3)
         self.assertEqual(len(response.json()["data"]["items"]), 2)
+
+    def test_user_with_audit_menu_permission_should_view_audit_logs(self) -> None:
+        self.client.force_authenticate(self.audit_permission_user)
+
+        list_response = self.client.get("/api/v1/audit/logs/")
+        summary_response = self.client.get("/api/v1/audit/summary/")
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(summary_response.status_code, 200)

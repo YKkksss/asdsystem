@@ -1,6 +1,6 @@
 <template>
   <section class="detail-page">
-    <template v-if="canManageArchives">
+    <template v-if="canViewScanTasks">
       <div class="page-actions">
         <RouterLink to="/digitization/scan-tasks">
           <a-button>返回任务列表</a-button>
@@ -34,8 +34,8 @@
             <a-alert
               class="upload-guide"
               show-icon
-              type="info"
-              :message="`上传支持 PDF、JPG、JPEG、PNG、TIF、TIFF，单个文件不超过 ${scanUploadMaxSizeMb} MB。`"
+              :type="canManageScanTasks ? 'info' : 'warning'"
+              :message="canManageScanTasks ? `上传支持 PDF、JPG、JPEG、PNG、TIF、TIFF，单个文件不超过 ${scanUploadMaxSizeMb} MB。` : '当前账号仅可查看任务详情，不能上传或处理扫描文件。'"
             />
 
             <div class="item-grid">
@@ -44,6 +44,8 @@
                 :key="item.id"
                 :bordered="false"
                 class="item-card"
+                :class="{ 'item-card-focused': item.id === focusedItemId }"
+                :data-item-id="item.id"
               >
                 <div class="item-header">
                   <div>
@@ -61,7 +63,7 @@
                   <span>最后上传：{{ formatDateTime(item.last_uploaded_at) }}</span>
                 </div>
 
-                <div class="upload-block">
+                <div v-if="canManageScanTasks" class="upload-block">
                   <input
                     :id="`scan-file-${item.id}`"
                     class="upload-input"
@@ -130,8 +132,8 @@
     <a-result
       v-else
       status="403"
-      title="仅档案管理员可查看扫描任务详情"
-      sub-title="请使用管理员或档案员账号登录，或返回档案检索页查看已授权数据。"
+      title="仅具备数字化任务权限的账号可查看扫描任务详情"
+      sub-title="请联系管理员分配数字化任务权限，或返回档案检索页查看当前已授权数据。"
     >
       <template #extra>
         <RouterLink to="/archives/records">
@@ -143,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue"
+import { computed, nextTick, reactive, ref, watch } from "vue"
 import { message } from "ant-design-vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 
@@ -157,13 +159,22 @@ import {
   type ScanTaskDetail,
 } from "@/api/digitization"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const canViewScanTasks = computed(() =>
+  profileHasAnyPermission(
+    authStore.profile,
+    ["menu.scan_task", "button.scan_task.manage"],
+    ARCHIVE_MANAGER_FALLBACK_ROLES,
+  ),
+)
+
+const canManageScanTasks = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.scan_task.manage"], ARCHIVE_MANAGER_FALLBACK_ROLES),
 )
 
 const statusLabelMap: Record<string, string> = {
@@ -209,6 +220,7 @@ const loading = ref(false)
 const uploadingItemId = ref<number | null>(null)
 const taskDetail = ref<ScanTaskDetail | null>(null)
 const selectedFileMap = reactive<Record<number, File[]>>({})
+const focusedItemId = ref<number | null>(null)
 
 function formatDateTime(value: string | null) {
   if (!value) {
@@ -231,6 +243,55 @@ function getTaskId() {
   return Number(route.params.taskId)
 }
 
+function resolveRouteItemId() {
+  const rawItemId = route.query.itemId
+  const itemId = Number(rawItemId)
+  if (!Number.isInteger(itemId) || itemId <= 0) {
+    return null
+  }
+  return itemId
+}
+
+async function clearRouteItemId() {
+  if (!route.query.itemId) {
+    return
+  }
+  const nextQuery = { ...route.query }
+  delete nextQuery.itemId
+  await router.replace({ query: nextQuery })
+}
+
+async function scrollToFocusedItem() {
+  await nextTick()
+  window.setTimeout(() => {
+    const element = document.querySelector<HTMLElement>(`.item-card[data-item-id="${focusedItemId.value}"]`)
+    element?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, 80)
+}
+
+async function focusTaskItemFromRoute() {
+  const itemId = resolveRouteItemId()
+  if (!itemId) {
+    if (focusedItemId.value && taskDetail.value?.items.some((item) => item.id === focusedItemId.value)) {
+      return
+    }
+    focusedItemId.value = null
+    return
+  }
+
+  const targetExists = taskDetail.value?.items.some((item) => item.id === itemId)
+  if (!targetExists) {
+    focusedItemId.value = null
+    await clearRouteItemId()
+    message.warning("目标扫描明细不存在或已被移除。")
+    return
+  }
+
+  focusedItemId.value = itemId
+  await scrollToFocusedItem()
+  await clearRouteItemId()
+}
+
 function resetFileInput(itemId: number) {
   const input = document.getElementById(`scan-file-${itemId}`) as HTMLInputElement | null
   if (input) {
@@ -250,6 +311,7 @@ async function loadTaskDetail() {
   try {
     const response = await fetchScanTaskDetail(taskId)
     taskDetail.value = response.data
+    await focusTaskItemFromRoute()
   } catch (error) {
     const response = (error as { response?: { status?: number } }).response
     if (response?.status === 404) {
@@ -277,6 +339,11 @@ function handleSelectFiles(itemId: number, event: Event) {
 }
 
 async function handleUpload(itemId: number) {
+  if (!canManageScanTasks.value) {
+    message.warning("当前账号无权上传扫描文件。")
+    return
+  }
+
   const files = selectedFileMap[itemId] || []
   if (!files.length) {
     message.warning("请先选择要上传的文件。")
@@ -318,10 +385,11 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 }
 
 watch(
-  () => [route.params.taskId, canManageArchives.value],
-  async ([, canManage]) => {
-    if (!canManage) {
+  () => [route.params.taskId, canViewScanTasks.value],
+  async ([, canView]) => {
+    if (!canView) {
       taskDetail.value = null
+      focusedItemId.value = null
       Object.keys(selectedFileMap).forEach((key) => {
         delete selectedFileMap[Number(key)]
       })
@@ -330,6 +398,19 @@ watch(
     await loadTaskDetail()
   },
   { immediate: true },
+)
+
+watch(
+  () => route.query.itemId,
+  (value, oldValue) => {
+    if (!value || value === oldValue) {
+      return
+    }
+    if (!canViewScanTasks.value || !taskDetail.value) {
+      return
+    }
+    void focusTaskItemFromRoute()
+  },
 )
 </script>
 
@@ -364,6 +445,10 @@ watch(
   border-radius: 22px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 249, 255, 0.92));
+}
+
+.item-card-focused {
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14);
 }
 
 .item-header {

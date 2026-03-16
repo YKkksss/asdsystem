@@ -9,7 +9,7 @@
     </div>
 
     <a-row :gutter="[20, 20]">
-      <a-col :xs="24" :xl="15">
+      <a-col :xs="24" :xl="canCreateBorrowApplication ? 15 : 24">
         <a-card :bordered="false" class="panel-card">
           <div class="toolbar-grid">
             <a-input-search
@@ -90,7 +90,7 @@
         </a-card>
       </a-col>
 
-      <a-col :xs="24" :xl="9">
+      <a-col v-if="canCreateBorrowApplication" :xs="24" :xl="9">
         <a-card :bordered="false" class="panel-card">
           <template #title>新建借阅申请</template>
 
@@ -261,6 +261,11 @@ import {
   type BorrowApplicationDetail,
 } from "@/api/borrowing"
 import { useAuthStore } from "@/stores/auth"
+import {
+  BORROW_CENTER_FALLBACK_ROLES,
+  REPORT_VIEW_FALLBACK_ROLES,
+  profileHasAnyPermission,
+} from "@/utils/access"
 import { getRequestErrorMessage, getRequestErrorStatus } from "@/utils/request"
 
 const authStore = useAuthStore()
@@ -295,8 +300,16 @@ const statusColorMap: Record<string, string> = {
   RETURNED: "green",
 }
 
+const canCreateBorrowApplication = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.borrow.create"], BORROW_CENTER_FALLBACK_ROLES),
+)
+
 const canViewAllApplications = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST", "AUDITOR"].includes(role.role_code))),
+  profileHasAnyPermission(
+    authStore.profile,
+    ["menu.borrow_approval", "menu.borrow_checkout", "button.borrow.return.confirm", "menu.report_center", "menu.audit_log"],
+    REPORT_VIEW_FALLBACK_ROLES,
+  ),
 )
 
 const loading = ref(false)
@@ -392,6 +405,11 @@ function handleApplicationTableChange(page: number, pageSize: number) {
 }
 
 async function loadArchiveOptions() {
+  if (!canCreateBorrowApplication.value) {
+    archiveOptions.value = []
+    return
+  }
+
   optionsLoading.value = true
   try {
     const response = await fetchArchives({ status: "ON_SHELF" })
@@ -466,6 +484,11 @@ async function consumeRouteApplicationId() {
 }
 
 async function handleCreateApplication() {
+  if (!canCreateBorrowApplication.value) {
+    message.warning("当前账号无权提交借阅申请。")
+    return
+  }
+
   submitting.value = true
   try {
     const response = await createBorrowApplication({
@@ -491,7 +514,9 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 
 onMounted(() => {
   void loadApplications()
-  void loadArchiveOptions()
+  if (canCreateBorrowApplication.value) {
+    void loadArchiveOptions()
+  }
 })
 
 watch(

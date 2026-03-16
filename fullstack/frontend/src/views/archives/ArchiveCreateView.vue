@@ -152,8 +152,8 @@
     <a-result
       v-else
       status="403"
-      title="仅档案管理员可维护档案主数据"
-      sub-title="请使用管理员或档案员账号登录，或返回档案检索页查看已授权数据。"
+      title="仅具备档案维护权限的账号可维护档案主数据"
+      sub-title="请联系管理员分配档案维护权限，或返回档案检索页查看当前已授权数据。"
     >
       <template #extra>
         <RouterLink to="/archives/records">
@@ -180,6 +180,7 @@ import {
 } from "@/api/archives"
 import { fetchDepartments } from "@/api/organizations"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 
 const route = useRoute()
 const router = useRouter()
@@ -212,10 +213,6 @@ const retentionOptions = [
   { value: "10年", label: "10年" },
 ]
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
-)
-
 const archiveId = computed(() => {
   const rawValue = route.params.archiveId
   const parsedValue = Number(rawValue)
@@ -223,6 +220,13 @@ const archiveId = computed(() => {
 })
 
 const isEditMode = computed(() => archiveId.value !== null)
+const canCreateArchives = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.create"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+const canEditArchives = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.archive.edit"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+const canManageArchives = computed(() => (isEditMode.value ? canEditArchives.value : canCreateArchives.value))
 const pageLoading = computed(() => optionsLoading.value || archiveLoading.value)
 const formTitle = computed(() => (isEditMode.value ? "编辑档案主数据" : "档案入库表单"))
 const submitButtonText = computed(() => (isEditMode.value ? "保存修改" : "保存档案"))

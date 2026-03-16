@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { loginByUi, prepareDigitizedArchive } from "./support"
+import { createLowClearanceArchiveViewer, loginByUi, prepareDigitizedArchive } from "./support"
 
 test("低密级账号查看高密级档案时应看到脱敏结果且无文件访问入口", async ({ page }) => {
   const archive = await prepareDigitizedArchive({
@@ -10,8 +10,9 @@ test("低密级账号查看高密级档案时应看到脱敏结果且无文件�
     securityLevel: "SECRET",
     responsiblePerson: "借阅人示例账号",
   })
+  const archiveViewer = await createLowClearanceArchiveViewer()
 
-  await loginByUi(page, "borrower", "Borrower12345")
+  await loginByUi(page, archiveViewer.username, archiveViewer.password)
   await page.goto("/archives/records")
   await expect(page).toHaveURL(/\/archives\/records$/)
 

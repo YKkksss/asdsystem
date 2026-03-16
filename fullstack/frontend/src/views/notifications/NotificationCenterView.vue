@@ -51,7 +51,7 @@
         </a-space>
 
         <a-button
-          v-if="canManageArchives"
+          v-if="canDispatchReminders"
           type="primary"
           :loading="dispatching"
           @click="handleDispatchReminders"
@@ -65,6 +65,7 @@
         :data-source="notifications"
         :loading="loading"
         row-key="id"
+        :row-class-name="getNotificationRowClassName"
         :pagination="{
           current: notificationPagination.current,
           pageSize: notificationPagination.pageSize,
@@ -132,13 +133,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, computed } from "vue"
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue"
 import { message } from "ant-design-vue"
-import { useRouter } from "vue-router"
+import { useRoute, useRouter } from "vue-router"
 
 import { dispatchBorrowReminders } from "@/api/borrowing"
 import {
-  fetchNotifications,
+  fetchNotificationPosition,
   fetchNotificationsPage,
   fetchNotificationSummary,
   markAllNotificationsAsRead,
@@ -147,12 +148,18 @@ import {
   type SystemNotification,
 } from "@/api/notifications"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 
 const authStore = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const canDispatchReminders = computed(() =>
+  profileHasAnyPermission(
+    authStore.profile,
+    ["button.notification.reminder.dispatch"],
+    ARCHIVE_MANAGER_FALLBACK_ROLES,
+  ),
 )
 
 const typeLabelMap: Record<string, string> = {
@@ -191,6 +198,7 @@ const markingId = ref<number | null>(null)
 const openingId = ref<number | null>(null)
 const markingAllRead = ref(false)
 const notifications = ref<SystemNotification[]>([])
+const focusedNotificationId = ref<number | null>(null)
 const notificationPagination = reactive({
   current: 1,
   pageSize: 8,
@@ -218,43 +226,67 @@ function handleReset() {
   filters.notification_type = undefined
   filters.is_read = undefined
   notificationPagination.current = 1
+  focusedNotificationId.value = null
   void loadPageData()
 }
 
 function handleNotificationTableChange(page: number, pageSize: number) {
   notificationPagination.current = page
   notificationPagination.pageSize = pageSize
+  focusedNotificationId.value = null
   void loadNotifications()
 }
 
 function canOpenBusiness(notification: SystemNotification) {
-  return Boolean(notification.biz_type && notification.biz_id && buildNotificationTarget(notification))
+  return Boolean(notification.route_path && !notification.route_path.startsWith("/notifications/messages"))
 }
 
-function buildNotificationTarget(notification: SystemNotification) {
-  if (!notification.biz_id) {
+function resolveRouteNotificationId() {
+  const rawNotificationId = route.query.notificationId
+  const notificationId = Number(rawNotificationId)
+  if (!Number.isInteger(notificationId) || notificationId <= 0) {
     return null
   }
+  return notificationId
+}
 
-  if (notification.biz_type === "borrow_application") {
-    return {
-      path: "/borrowing/applications",
-      query: {
-        applicationId: String(notification.biz_id),
-      },
-    }
+async function clearFocusedNotificationQuery() {
+  if (!route.query.notificationId) {
+    return
   }
+  const nextQuery = { ...route.query }
+  delete nextQuery.notificationId
+  await router.replace({ query: nextQuery })
+}
 
-  if (notification.biz_type === "destroy_application") {
-    return {
-      path: "/destruction/applications",
-      query: {
-        applicationId: String(notification.biz_id),
-      },
-    }
+async function scrollToFocusedNotification() {
+  await nextTick()
+  window.setTimeout(() => {
+    const row = document.querySelector<HTMLElement>(
+      `.ant-table-row[data-row-key="${focusedNotificationId.value}"]`,
+    )
+    row?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, 80)
+}
+
+async function focusNotificationById(notificationId: number) {
+  filters.notification_type = undefined
+  filters.is_read = undefined
+
+  try {
+    const response = await fetchNotificationPosition(notificationId, notificationPagination.pageSize)
+    notificationPagination.current = response.data.page
+    await loadPageData()
+    focusedNotificationId.value = notificationId
+    await scrollToFocusedNotification()
+    await clearFocusedNotificationQuery()
+  } catch (error) {
+    handleRequestError(error, "定位通知失败。")
   }
+}
 
-  return null
+function getNotificationRowClassName(record: SystemNotification) {
+  return record.id === focusedNotificationId.value ? "notification-row-focused" : ""
 }
 
 async function loadNotifications() {
@@ -319,8 +351,7 @@ async function handleMarkAllRead() {
 }
 
 async function handleOpenBusiness(notification: SystemNotification) {
-  const target = buildNotificationTarget(notification)
-  if (!target) {
+  if (!canOpenBusiness(notification)) {
     message.warning("当前通知没有可跳转的业务页面。")
     return
   }
@@ -334,13 +365,18 @@ async function handleOpenBusiness(notification: SystemNotification) {
         handleRequestError(error, "标记通知已读失败，将继续为你打开业务页面。")
       }
     }
-    await router.push(target)
+    await router.push(notification.route_path)
   } finally {
     openingId.value = null
   }
 }
 
 async function handleDispatchReminders() {
+  if (!canDispatchReminders.value) {
+    message.warning("当前账号无权执行催还扫描。")
+    return
+  }
+
   dispatching.value = true
   try {
     const response = await dispatchBorrowReminders()
@@ -363,8 +399,27 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 }
 
 onMounted(() => {
+  const notificationId = resolveRouteNotificationId()
+  if (notificationId) {
+    void focusNotificationById(notificationId)
+    return
+  }
   void loadPageData()
 })
+
+watch(
+  () => route.query.notificationId,
+  (value, oldValue) => {
+    if (!value || value === oldValue) {
+      return
+    }
+    const notificationId = resolveRouteNotificationId()
+    if (!notificationId) {
+      return
+    }
+    void focusNotificationById(notificationId)
+  },
+)
 </script>
 
 <style scoped>
@@ -420,6 +475,14 @@ onMounted(() => {
 .title-cell span,
 .action-muted {
   color: #667085;
+}
+
+:deep(.notification-row-focused > td) {
+  background: rgba(230, 244, 255, 0.88) !important;
+}
+
+:deep(.notification-row-focused:hover > td) {
+  background: rgba(186, 224, 255, 0.92) !important;
 }
 
 @media (max-width: 720px) {

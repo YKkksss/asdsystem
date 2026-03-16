@@ -1,3 +1,4 @@
+from rest_framework.exceptions import ValidationError
 from rest_framework import decorators, mixins, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -10,7 +11,7 @@ from apps.notifications.api.serializers import (
     SystemNotificationSerializer,
 )
 from apps.notifications.models import SystemNotification
-from apps.notifications.services import build_notification_summary
+from apps.notifications.services import build_notification_page_position, build_notification_summary
 
 
 class SystemNotificationViewSet(
@@ -53,6 +54,28 @@ class SystemNotificationViewSet(
         serializer = MarkNotificationReadSerializer(context={"notification": notification})
         notification = serializer.save()
         return success_response(data=SystemNotificationSerializer(notification).data, message="通知已标记为已读")
+
+    @decorators.action(detail=True, methods=["get"], url_path="position")
+    def position(self, request, pk=None):
+        raw_page_size = (request.query_params.get("page_size") or "").strip()
+        if raw_page_size:
+            try:
+                page_size = int(raw_page_size)
+            except ValueError as exc:
+                raise ValidationError({"page_size": "分页大小必须为正整数。"}) from exc
+        else:
+            page_size = 8
+
+        if page_size <= 0 or page_size > 200:
+            raise ValidationError({"page_size": "分页大小必须在 1 到 200 之间。"})
+
+        notification = self.get_object()
+        data = build_notification_page_position(
+            queryset=self.get_queryset(),
+            notification=notification,
+            page_size=page_size,
+        )
+        return success_response(data=data)
 
 
 class NotificationSummaryAPIView(APIView):

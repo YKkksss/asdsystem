@@ -15,6 +15,7 @@ from apps.accounts.api.serializers import (
     UserSerializer,
 )
 from apps.accounts.models import Role, SystemPermission
+from apps.accounts.bootstrap_defaults import build_default_role_permission_templates
 from apps.accounts.services import (
     build_user_profile,
     complete_login_success,
@@ -23,12 +24,19 @@ from apps.accounts.services import (
     register_login_failure,
     unlock_user,
 )
-from apps.common.permissions import IsSystemAdmin
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import error_response, success_response
 
 
 User = get_user_model()
+
+SYSTEM_ADMIN_FALLBACK_ROLES = {"ADMIN"}
+ROLE_MANAGE_PERMISSION_CODES = {"button.system.role.manage"}
+ROLE_READ_PERMISSION_CODES = {"button.system.role.manage", "button.system.user.manage"}
+PERMISSION_MANAGE_PERMISSION_CODES = {"button.system.permission.manage"}
+PERMISSION_READ_PERMISSION_CODES = {"button.system.permission.manage", "button.system.role.manage"}
+USER_MANAGE_PERMISSION_CODES = {"button.system.user.manage"}
 
 
 class RoleViewSet(
@@ -41,7 +49,15 @@ class RoleViewSet(
 ):
     queryset = Role.objects.prefetch_related("permissions").order_by("id")
     serializer_class = RoleSerializer
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": ROLE_READ_PERMISSION_CODES,
+        "retrieve": ROLE_READ_PERMISSION_CODES,
+        "create": ROLE_MANAGE_PERMISSION_CODES,
+        "update": ROLE_MANAGE_PERMISSION_CODES,
+        "partial_update": ROLE_MANAGE_PERMISSION_CODES,
+    }
+    permission_fallback_roles = SYSTEM_ADMIN_FALLBACK_ROLES
     search_fields = ["role_code", "role_name"]
     ordering_fields = ["id", "created_at"]
 
@@ -79,7 +95,15 @@ class SystemPermissionViewSet(
 ):
     queryset = SystemPermission.objects.select_related("parent").order_by("sort_order", "id")
     serializer_class = SystemPermissionSerializer
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": PERMISSION_READ_PERMISSION_CODES,
+        "retrieve": PERMISSION_READ_PERMISSION_CODES,
+        "create": PERMISSION_MANAGE_PERMISSION_CODES,
+        "update": PERMISSION_MANAGE_PERMISSION_CODES,
+        "partial_update": PERMISSION_MANAGE_PERMISSION_CODES,
+    }
+    permission_fallback_roles = SYSTEM_ADMIN_FALLBACK_ROLES
     search_fields = ["permission_code", "permission_name", "module_name"]
     ordering_fields = ["sort_order", "id", "created_at"]
 
@@ -107,6 +131,15 @@ class SystemPermissionViewSet(
         return success_response(data=self.get_serializer(permission).data, message="权限更新成功")
 
 
+class PermissionTemplateAPIView(APIView):
+    permission_classes = [HasConfiguredSystemPermission]
+    required_permission_codes = ROLE_MANAGE_PERMISSION_CODES
+    permission_fallback_roles = SYSTEM_ADMIN_FALLBACK_ROLES
+
+    def get(self, request):
+        return success_response(data=build_default_role_permission_templates())
+
+
 class UserViewSet(
     OptionalPaginationListMixin,
     mixins.ListModelMixin,
@@ -119,7 +152,9 @@ class UserViewSet(
         Prefetch("roles", queryset=Role.objects.filter(status=True))
     )
     serializer_class = UserSerializer
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [HasConfiguredSystemPermission]
+    required_permission_codes = USER_MANAGE_PERMISSION_CODES
+    permission_fallback_roles = SYSTEM_ADMIN_FALLBACK_ROLES
     search_fields = ["username", "real_name", "email"]
     ordering_fields = ["id", "created_at", "last_login_at"]
 
@@ -256,7 +291,9 @@ class ProfileAPIView(APIView):
 
 
 class UnlockUserAPIView(APIView):
-    permission_classes = [IsSystemAdmin]
+    permission_classes = [HasConfiguredSystemPermission]
+    required_permission_codes = USER_MANAGE_PERMISSION_CODES
+    permission_fallback_roles = SYSTEM_ADMIN_FALLBACK_ROLES
 
     def post(self, request, user_id: int):
         user = User.objects.filter(id=user_id).first()

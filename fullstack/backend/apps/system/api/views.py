@@ -1,9 +1,9 @@
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
-from apps.common.permissions import IsSystemAdminOrInternalRequest
+from apps.common.permissions import HasConfiguredSystemPermissionOrInternalRequest
 from apps.common.response import success_response
-from apps.system.services import build_health_detail_payload, build_health_payload
+from apps.system.services import build_dashboard_payload, build_health_detail_payload, build_health_payload
 
 
 class RootHealthView(APIView):
@@ -23,7 +23,16 @@ class SystemHealthView(APIView):
 
 
 class SystemHealthDetailView(APIView):
-    permission_classes = [IsSystemAdminOrInternalRequest]
+    permission_classes = [HasConfiguredSystemPermissionOrInternalRequest]
+    required_permission_codes = {"button.system.health.detail"}
+    permission_fallback_roles = {"ADMIN"}
 
     def get(self, request):
         return success_response(data=build_health_detail_payload())
+
+
+class SystemDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return success_response(data=build_dashboard_payload(request.user))

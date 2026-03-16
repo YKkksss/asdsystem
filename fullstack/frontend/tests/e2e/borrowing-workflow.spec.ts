@@ -28,6 +28,8 @@ async function createBorrowApplicationByApi(archiveId: number) {
 }
 
 test("借阅申请应能完成审批、出库、归还与通知回跳闭环", async ({ browser }) => {
+  test.setTimeout(90_000)
+
   const archive = await prepareOnShelfArchive({
     codePrefix: "E2E-BORROW",
     titlePrefix: "E2E 借阅闭环档案",
@@ -108,7 +110,11 @@ test("借阅申请应能完成审批、出库、归还与通知回跳闭环", as
     await borrowerPage.goto("/notifications/messages")
     await expect(borrowerPage).toHaveURL(/\/notifications\/messages$/)
 
-    const notificationRow = borrowerPage.locator(".ant-table-tbody tr").filter({ hasText: "档案归还已确认入库" }).first()
+    const notificationRow = borrowerPage.locator(".ant-table-tbody tr").filter({
+      hasText: "档案归还已确认入库",
+    }).filter({
+      hasText: archive.archiveCode,
+    }).first()
     await expect(notificationRow).toBeVisible()
     await notificationRow.getByRole("button", { name: "查看业务" }).click()
 

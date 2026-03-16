@@ -30,9 +30,32 @@ from apps.archives.services import (
 )
 from apps.audit.models import ArchiveFileAccessAction
 from apps.audit.services import mark_archive_file_access_ticket_used, record_audit_log, validate_archive_file_access_ticket
-from apps.common.permissions import IsArchiveManager
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import error_response, success_response
+
+ARCHIVE_STORAGE_READ_PERMISSION_CODES = {
+    "menu.archive_location",
+    "button.location.manage",
+    "button.archive.create",
+    "button.archive.edit",
+    "button.borrow.return.confirm",
+}
+ARCHIVE_STORAGE_MANAGE_PERMISSION_CODES = {"button.location.manage"}
+ARCHIVE_STORAGE_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
+ARCHIVE_RECORD_READ_PERMISSION_CODES = {
+    "menu.archive_center",
+    "button.archive.create",
+    "button.archive.edit",
+    "button.archive.transition",
+    "button.archive.generate_code",
+    "button.archive.print",
+    "button.borrow.create",
+    "button.destruction.create",
+    "button.scan_task.manage",
+}
+ARCHIVE_RECORD_READ_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
+ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
 
 
 class ArchiveStorageLocationViewSet(
@@ -55,10 +78,21 @@ class ArchiveStorageLocationViewSet(
     search_fields = ["warehouse_name", "area_name", "cabinet_code", "rack_code", "box_code", "full_location_code"]
     ordering_fields = ["created_at", "updated_at", "id"]
     filterset_fields = ["warehouse_name", "cabinet_code", "status"]
-
-    def get_permissions(self):
-        permission_classes = [IsArchiveManager]
-        return [permission() for permission in permission_classes]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": ARCHIVE_STORAGE_READ_PERMISSION_CODES,
+        "retrieve": ARCHIVE_STORAGE_READ_PERMISSION_CODES,
+        "create": ARCHIVE_STORAGE_MANAGE_PERMISSION_CODES,
+        "update": ARCHIVE_STORAGE_MANAGE_PERMISSION_CODES,
+        "partial_update": ARCHIVE_STORAGE_MANAGE_PERMISSION_CODES,
+    }
+    action_permission_fallback_roles = {
+        "list": ARCHIVE_STORAGE_FALLBACK_ROLES,
+        "retrieve": ARCHIVE_STORAGE_FALLBACK_ROLES,
+        "create": ARCHIVE_STORAGE_FALLBACK_ROLES,
+        "update": ARCHIVE_STORAGE_FALLBACK_ROLES,
+        "partial_update": ARCHIVE_STORAGE_FALLBACK_ROLES,
+    }
 
     def list(self, request, *args, **kwargs):
         return self.build_list_response()
@@ -97,6 +131,29 @@ class ArchiveRecordViewSet(
     search_fields = ["archive_code", "title", "keywords", "responsible_person"]
     ordering_fields = ["id", "created_at", "updated_at", "year"]
     filterset_fields = ["status", "year", "retention_period", "security_level", "responsible_dept", "location"]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": ARCHIVE_RECORD_READ_PERMISSION_CODES,
+        "retrieve": ARCHIVE_RECORD_READ_PERMISSION_CODES,
+        "create": {"button.archive.create"},
+        "update": {"button.archive.edit"},
+        "partial_update": {"button.archive.edit"},
+        "generate_codes": {"button.archive.generate_code"},
+        "print_codes": {"button.archive.print"},
+        "batch_print_codes": {"button.archive.print"},
+        "transition_status": {"button.archive.transition"},
+    }
+    action_permission_fallback_roles = {
+        "list": ARCHIVE_RECORD_READ_FALLBACK_ROLES,
+        "retrieve": ARCHIVE_RECORD_READ_FALLBACK_ROLES,
+        "create": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+        "update": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+        "partial_update": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+        "generate_codes": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+        "print_codes": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+        "batch_print_codes": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+        "transition_status": ARCHIVE_RECORD_MANAGE_FALLBACK_ROLES,
+    }
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -146,13 +203,6 @@ class ArchiveRecordViewSet(
 
         queryset = filter_archive_queryset_by_user_scope(queryset, self.request.user)
         return queryset.distinct()
-
-    def get_permissions(self):
-        if self.action in {"list", "retrieve"}:
-            permission_classes = [IsAuthenticated]
-        else:
-            permission_classes = [IsArchiveManager]
-        return [permission() for permission in permission_classes]
 
     def get_serializer_class(self):
         if self.action in {"create", "update", "partial_update"}:

@@ -37,7 +37,7 @@
           <a-button type="primary" :loading="loading" @click="loadApplications">刷新列表</a-button>
         </a-space>
 
-        <a-button v-if="canManageArchives" type="primary" @click="openCreateModal">
+        <a-button v-if="canCreateDestruction" type="primary" @click="openCreateModal">
           发起销毁申请
         </a-button>
       </div>
@@ -91,7 +91,7 @@
                 审批
               </a-button>
               <a-button
-                v-if="record.can_execute && canManageArchives"
+                v-if="record.can_execute && canExecuteDestruction"
                 type="link"
                 @click="openExecuteModal(record)"
               >
@@ -336,6 +336,7 @@ import {
   type DestroyApplicationDetail,
 } from "@/api/destruction"
 import { useAuthStore } from "@/stores/auth"
+import { ARCHIVE_MANAGER_FALLBACK_ROLES, profileHasAnyPermission } from "@/utils/access"
 import { getRequestErrorMessage, getRequestErrorStatus } from "@/utils/request"
 
 const authStore = useAuthStore()
@@ -407,12 +408,16 @@ const executionForm = reactive({
   execution_note: "",
 })
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const canApprove = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.destruction.approve"], ["ADMIN"]),
 )
 
-const canApprove = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => role.role_code === "ADMIN")),
+const canCreateDestruction = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.destruction.create"], ARCHIVE_MANAGER_FALLBACK_ROLES),
+)
+
+const canExecuteDestruction = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.destruction.execute"], ARCHIVE_MANAGER_FALLBACK_ROLES),
 )
 
 const scopeOptions = computed(() => {
@@ -422,7 +427,7 @@ const scopeOptions = computed(() => {
   if (canApprove.value) {
     options.push({ value: "approval", label: "待我审批" })
   }
-  if (canManageArchives.value) {
+  if (canExecuteDestruction.value) {
     options.push({ value: "execution", label: "待执行" })
     options.push({ value: "all", label: "全部记录" })
   }
@@ -445,7 +450,7 @@ const summaryCards = computed(() => {
   const executed = applications.value.filter((item) => item.status === "EXECUTED").length
   return [
     { label: "当前记录", value: total, caption: "当前筛选条件下的销毁申请数量" },
-    { label: "待审批", value: pending, caption: "仍需管理员审批的销毁申请数量" },
+    { label: "待审批", value: pending, caption: "仍需具备销毁审批权限的人员处理的申请数量" },
     { label: "待执行", value: approved, caption: "审批通过但尚未完成销毁执行的数量" },
     { label: "已执行", value: executed, caption: "已经完成销毁留痕并流转结束的数量" },
   ]
@@ -477,10 +482,20 @@ function resetExecutionForm() {
   }
 }
 
+function getDefaultScope() {
+  if (canExecuteDestruction.value) {
+    return "all" as const
+  }
+  if (canApprove.value) {
+    return "approval" as const
+  }
+  return "mine" as const
+}
+
 function handleReset() {
   filters.keyword = ""
   filters.status = undefined
-  filters.scope = canManageArchives.value ? "all" : "mine"
+  filters.scope = getDefaultScope()
   applicationPagination.current = 1
   void loadApplications()
 }
@@ -530,6 +545,10 @@ async function loadArchiveCandidates() {
 }
 
 function openCreateModal() {
+  if (!canCreateDestruction.value) {
+    message.warning("当前账号无权发起销毁申请。")
+    return
+  }
   resetCreateForm()
   createModalOpen.value = true
   if (!archiveCandidates.value.length) {
@@ -538,12 +557,20 @@ function openCreateModal() {
 }
 
 function openApprovalModal(record: DestroyApplication) {
+  if (!canApprove.value) {
+    message.warning("当前账号无权审批销毁申请。")
+    return
+  }
   selectedApplication.value = record
   resetApprovalForm()
   approvalModalOpen.value = true
 }
 
 function openExecuteModal(record: DestroyApplication) {
+  if (!canExecuteDestruction.value) {
+    message.warning("当前账号无权执行销毁。")
+    return
+  }
   selectedApplication.value = record
   resetExecutionForm()
   executeModalOpen.value = true
@@ -601,6 +628,10 @@ async function consumeRouteApplicationId() {
 }
 
 async function handleCreateApplication() {
+  if (!canCreateDestruction.value) {
+    message.warning("当前账号无权发起销毁申请。")
+    return
+  }
   if (!createForm.archive_id) {
     message.warning("请选择需要发起销毁的档案。")
     return
@@ -629,6 +660,10 @@ async function handleCreateApplication() {
 }
 
 async function handleSubmitApproval() {
+  if (!canApprove.value) {
+    message.warning("当前账号无权审批销毁申请。")
+    return
+  }
   if (!selectedApplication.value) {
     return
   }
@@ -675,6 +710,10 @@ async function handleSubmitApproval() {
 }
 
 async function handleSubmitExecution() {
+  if (!canExecuteDestruction.value) {
+    message.warning("当前账号无权执行销毁。")
+    return
+  }
   if (!selectedApplication.value) {
     return
   }
@@ -730,7 +769,7 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 }
 
 onMounted(() => {
-  filters.scope = canManageArchives.value ? "all" : "mine"
+  filters.scope = getDefaultScope()
   void loadApplications()
 })
 
@@ -740,6 +779,15 @@ watch(
     void consumeRouteApplicationId()
   },
   { immediate: true },
+)
+
+watch(
+  () => [canApprove.value, canExecuteDestruction.value],
+  () => {
+    if (!scopeOptions.value.some((item) => item.value === filters.scope)) {
+      filters.scope = getDefaultScope()
+    }
+  },
 )
 </script>
 

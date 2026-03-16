@@ -4,6 +4,7 @@ from rest_framework.test import APIClient, APITestCase
 from apps.audit.models import AuditLog
 from apps.accounts.models import DataScope, Role
 from apps.accounts.services import assign_roles_to_user
+from apps.notifications.models import NotificationType, SystemNotification
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
 
@@ -98,6 +99,14 @@ class AuthApiTests(APITestCase):
             3,
         )
         self.assertTrue(AuditLog.objects.filter(action_code="USER_UNLOCK", username="admin").exists())
+        unlock_notification = SystemNotification.objects.filter(
+            user=self.normal_user,
+            notification_type=NotificationType.SYSTEM,
+            title="账号已解锁",
+        ).first()
+        self.assertIsNotNone(unlock_notification)
+        self.assertIsNone(unlock_notification.biz_type)
+        self.assertIn("已为你解除登录锁定", unlock_notification.content)
 
     def test_logout_should_record_audit_log(self) -> None:
         self.client.force_authenticate(self.normal_user)

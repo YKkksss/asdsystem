@@ -10,8 +10,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import DataScope, Role, SecurityClearance
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveFile, ArchiveFileStatus, ArchiveStatus
 from apps.digitization.models import FileProcessJob, FileProcessJobStatus, ScanTaskItemStatus, ScanTaskStatus
 from apps.organizations.models import Department
@@ -40,6 +40,33 @@ class ScanTaskApiTests(APITestCase):
             data_scope=DataScope.DEPT,
             status=True,
         )
+        self.scan_menu_permission = SystemPermission.objects.create(
+            permission_code="menu.scan_task",
+            permission_name="数字化任务",
+            permission_type="MENU",
+            module_name="digitization",
+            route_path="/digitization/scan-tasks",
+            sort_order=40,
+            status=True,
+        )
+        self.scan_manage_permission = SystemPermission.objects.create(
+            permission_code="button.scan_task.manage",
+            permission_name="维护数字化任务",
+            permission_type="BUTTON",
+            module_name="digitization",
+            sort_order=270,
+            status=True,
+        )
+        self.scan_operator_role = Role.objects.create(
+            role_code="SCAN_OPERATOR",
+            role_name="数字化操作员",
+            data_scope=DataScope.DEPT,
+            status=True,
+        )
+        assign_permissions_to_role(
+            self.scan_operator_role,
+            [self.scan_menu_permission.id, self.scan_manage_permission.id],
+        )
         self.user = User.objects.create_user(
             username="archivist",
             password="Archivist123",
@@ -48,6 +75,14 @@ class ScanTaskApiTests(APITestCase):
             is_staff=True,
         )
         assign_roles_to_user(self.user, [self.archivist_role.id])
+        self.scan_operator_user = User.objects.create_user(
+            username="scan_operator",
+            password="ScanOperator123",
+            real_name="数字化操作员",
+            dept=self.department,
+            is_staff=True,
+        )
+        assign_roles_to_user(self.scan_operator_user, [self.scan_operator_role.id])
         self.client.force_authenticate(self.user)
 
     def tearDown(self) -> None:
@@ -225,3 +260,19 @@ class ScanTaskApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["message"], "单个文件大小不能超过 1 MB。")
         self.assertFalse(ArchiveFile.objects.filter(scan_task_item_id=task_item_id).exists())
+
+    def test_user_with_scan_permissions_should_create_scan_task(self) -> None:
+        archive = self._create_archive("SCAN-2026-099")
+        self.client.force_authenticate(self.scan_operator_user)
+
+        response = self.client.post(
+            "/api/v1/digitization/scan-tasks/",
+            {
+                "task_name": "权限化扫描任务",
+                "archive_ids": [archive.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["data"]["task_name"], "权限化扫描任务")

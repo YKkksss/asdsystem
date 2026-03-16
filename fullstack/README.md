@@ -59,6 +59,19 @@ fullstack/
 2. 当未传分页参数时，接口仍保持原有数组结构，兼容既有下拉框和旧调用。
 3. 当前已优先接入服务端分页的页面包括档案列表、借阅申请列表、借阅审批、借阅出库、借阅归还、销毁申请、扫描任务、通知中心、审计日志。
 
+## 工作台与导航约定
+
+最近一轮前端收口后，工作台、左侧菜单和常用深链已经统一到真实业务场景，当前约定如下：
+
+1. 工作台不再展示“项目开发说明”，而是按角色输出真实业务看板，包括核心指标、近期待办、业务动态、风险提醒、通知摘要与趋势信息。
+2. 左侧导航采用静态路由 + 权限裁剪的方式组织，按“工作台、档案业务、借阅业务、统计监督、系统管理”等父级菜单分组展示，页面入口保持固定，是否可见由当前账号权限决定。
+3. 当前前端已支持以下高频直达场景：
+   - 通知中心根据 `notificationId` 聚焦指定通知；
+   - 系统管理根据 `tab` 与 `userId` 直达指定标签页并自动打开编辑弹窗；
+   - 档案中心根据 `archiveId` 与 `fileId` 直达档案详情并高亮目标文件；
+   - 扫描任务详情根据 `itemId` 聚焦目标扫描明细卡片。
+4. 工作台中的待办项与通知摘要会直接返回前端可用的 `route_path`，用于审批、出库、归还、销毁审批与通知中心的就近跳转。
+
 ## 通知脱敏与权限校验约定
 
 本轮联调补充了通知链路与文件访问权限的安全收口，当前约定如下：
@@ -68,6 +81,13 @@ fullstack/
 3. 邮件地址输出同样采用脱敏策略，避免在终端日志、巡检日志和命令回显中暴露完整账号。
 4. 文件预览、下载、摘要、责任者等敏感字段的可见性由后端按密级和责任人关系统一裁剪，前端只消费后端已脱敏结果，不做额外字段映射或前端侧伪权限判断。
 5. 前端 E2E 已同时覆盖“有权限访问”和“密级不足被限制”两类文件访问场景，确保页面不会在无权限时暴露预览或下载入口。
+6. 借阅中心读取权限已改为“接口入口权限 + scope 精确校验 + 详情联合可见范围”三层控制：
+   - `scope=mine` 仅允许具备借阅中心/归还提交能力的账号查看自己的申请；
+   - `scope=approval`、`scope=checkout`、`scope=return` 分别要求审批、出库、归还确认对应权限；
+   - 未显式传 `scope` 的详情访问会按“本人申请、当前审批、通知关联、待出库、待确认归还”等可见范围自动并集裁剪，避免自定义角色出现“按钮可见但详情 403”或“能进详情但列表为空”。
+7. `GET /api/v1/system/health/detail/` 已切换为“权限码优先，内网兜底”：
+   - 外网访问时需要 `button.system.health.detail` 或管理员角色；
+   - 内网、回环地址和链路本地自检仍可直接访问，便于部署探针、巡检脚本和启动联调复用同一接口。
 
 ## 启动与部署
 
@@ -144,6 +164,11 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 1. 一键部署时，最终账号密码以 `runtime/deployment_runtime/accounts.md` 为准。
 2. 手工执行 `uv run manage.py bootstrap_system --username admin --password 你的安全密码` 时，管理员密码以命令参数为准，其余三个示例账号仍按上述默认值初始化。
 3. 首次登录后建议立即修改所有默认密码，避免继续使用示例口令。
+4. 当前内置角色的默认菜单职责如下：
+   - 管理员：拥有全部菜单、按钮与系统配置权限。
+   - 档案员：默认可见工作台、档案业务、借阅业务、通知中心与报表中心，不默认承担借阅审批与审计日志查看。
+   - 借阅人：默认只保留工作台、借阅中心、归还中心、通知中心等个人借阅相关入口。
+   - 审计员：默认聚焦工作台、通知中心、报表中心、审计日志等监督类只读入口，不默认进入档案中心和销毁中心。
 
 ### 开发启动脚本
 
@@ -243,6 +268,24 @@ backend/
 3. 复制环境变量：`cp .env.example .env`
 4. 启动开发服务：`npm run dev`
 
+如果需要临时通过公网 IP 或域名访问前端开发服务，可直接使用以下任一方式：
+
+```bash
+ASD_FRONTEND_PUBLIC_HOST=你的公网IP或域名 npm run dev
+```
+
+或在 `fullstack/` 目录下执行：
+
+```bash
+./scripts/start.sh 1 你的公网IP或域名
+```
+
+说明：
+
+- 默认监听 `0.0.0.0:5173`
+- 默认允许任意公网 IP 或域名访问当前开发服务
+- 如果你通过反向代理访问，且热更新连接的协议或端口不同，可在 `frontend/.env` 中补充 `ASD_FRONTEND_HMR_PROTOCOL` 与 `ASD_FRONTEND_HMR_PORT`
+
 默认访问地址：
 
 - 前端开发服务：`http://127.0.0.1:5173`
@@ -264,9 +307,12 @@ backend/
 
 - 后端静态检查：`cd backend && uv run manage.py check`
 - 前端类型校验：`cd frontend && npm run type-check`
+- 工作台与角色视角定向测试：`cd backend && uv run manage.py test apps.system.tests.test_dashboard_api`
 - 分页与通知链路定向测试：`cd backend && uv run manage.py test apps.archives.tests.test_archive_api apps.audit.tests.test_audit_api apps.borrowing.tests.test_borrowing_api apps.notifications.tests.test_notification_api apps.notifications.tests.test_notification_command`
 - 通知脱敏定向测试：`cd backend && uv run manage.py test apps.notifications.tests.test_notification_services_unit apps.notifications.tests.test_notification_command`
 - 文件访问权限正负向回归：`cd frontend && npx playwright test tests/e2e/archive-file-access.spec.ts tests/e2e/archive-file-access-restricted.spec.ts`
+- 内置角色菜单与直链拦截回归：`cd frontend && npx playwright test tests/e2e/auth-and-permission.spec.ts`
+- 通知深链与业务直达回归：`cd frontend && npx playwright test tests/e2e/notification-deeplink.spec.ts`
 - 单元测试：`./scripts/run_tests.sh unit`
 - API 接口测试：`./scripts/run_tests.sh api`
 - 前端 E2E 联调测试：`./scripts/run_tests.sh e2e`

@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
 
-from apps.accounts.models import Role, UserRole
+from apps.accounts.models import Role, SystemPermission, UserRole
 from apps.organizations.models import Department
 
 
@@ -33,6 +33,7 @@ class BootstrapSystemCommandTests(TestCase):
             )
 
             self.assertEqual(Role.objects.count(), 4)
+            self.assertGreaterEqual(SystemPermission.objects.count(), 10)
             self.assertEqual(Department.objects.count(), 4)
             self.assertEqual(User.objects.filter(username__in=["admin", "archivist", "borrower", "auditor"]).count(), 4)
 
@@ -50,6 +51,35 @@ class BootstrapSystemCommandTests(TestCase):
             self.assertEqual(UserRole.objects.filter(user=archivist_user).count(), 1)
             self.assertEqual(UserRole.objects.filter(user=borrower_user).count(), 1)
             self.assertEqual(UserRole.objects.filter(user=auditor_user).count(), 1)
+            self.assertTrue(
+                Role.objects.get(role_code="ADMIN").permissions.filter(permission_code="menu.system_management").exists()
+            )
+            self.assertTrue(
+                Role.objects.get(role_code="ADMIN").permissions.filter(permission_code="button.system.health.detail").exists()
+            )
+            self.assertTrue(
+                Role.objects.get(role_code="BORROWER").permissions.filter(permission_code="menu.borrow_center").exists()
+            )
+            self.assertFalse(
+                Role.objects.get(role_code="BORROWER").permissions.filter(permission_code="menu.archive_center").exists()
+            )
+            self.assertTrue(
+                Role.objects.get(role_code="ARCHIVIST").permissions.filter(
+                    permission_code="button.notification.reminder.dispatch"
+                ).exists()
+            )
+            self.assertTrue(
+                Role.objects.get(role_code="AUDITOR").permissions.filter(permission_code="menu.report_center").exists()
+            )
+            self.assertFalse(
+                Role.objects.get(role_code="AUDITOR").permissions.filter(permission_code="menu.archive_center").exists()
+            )
+            self.assertFalse(
+                Role.objects.get(role_code="AUDITOR").permissions.filter(permission_code="menu.destruction_center").exists()
+            )
+            self.assertFalse(
+                Role.objects.get(role_code="BORROWER").permissions.filter(permission_code="menu.system_management").exists()
+            )
 
             business_department = Department.objects.get(dept_code="BUS")
             self.assertEqual(business_department.approver_user_id, admin_user.id)

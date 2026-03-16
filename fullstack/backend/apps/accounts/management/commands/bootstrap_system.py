@@ -6,14 +6,17 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.accounts.bootstrap_defaults import (
     DEFAULT_CHILD_DEPARTMENTS,
+    DEFAULT_PERMISSION_DEFINITIONS,
     DEFAULT_ROLE_DEFINITIONS,
+    DEFAULT_ROLE_PERMISSION_CODES,
     BootstrapDepartmentDefinition,
+    BootstrapPermissionDefinition,
     BootstrapUserDefinition,
     build_default_users,
     render_account_markdown,
 )
-from apps.accounts.models import Role
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import Role, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
 
@@ -72,6 +75,46 @@ class Command(BaseCommand):
             role_map[definition.role_code] = role
         return role_map
 
+    def _upsert_permission_map(self) -> dict[str, SystemPermission]:
+        permission_map: dict[str, SystemPermission] = {}
+        for definition in DEFAULT_PERMISSION_DEFINITIONS:
+            permission, _ = SystemPermission.objects.get_or_create(
+                permission_code=definition.permission_code,
+                defaults={
+                    "permission_name": definition.permission_name,
+                    "permission_type": definition.permission_type,
+                    "module_name": definition.module_name,
+                    "route_path": definition.route_path,
+                    "sort_order": definition.sort_order,
+                    "status": True,
+                },
+            )
+            permission.permission_name = definition.permission_name
+            permission.permission_type = definition.permission_type
+            permission.module_name = definition.module_name
+            permission.route_path = definition.route_path
+            permission.sort_order = definition.sort_order
+            permission.status = True
+            permission.parent = None
+            permission.save()
+            permission_map[definition.permission_code] = permission
+        return permission_map
+
+    def _bind_role_permissions(
+        self,
+        *,
+        role_map: dict[str, Role],
+        permission_map: dict[str, SystemPermission],
+    ) -> None:
+        for role_code, role in role_map.items():
+            permission_codes = DEFAULT_ROLE_PERMISSION_CODES.get(role_code, ())
+            permission_ids = [
+                permission_map[permission_code].id
+                for permission_code in permission_codes
+                if permission_code in permission_map
+            ]
+            assign_permissions_to_role(role, permission_ids)
+
     def _upsert_user(
         self,
         *,
@@ -128,6 +171,8 @@ class Command(BaseCommand):
             self._upsert_department(definition, department_map)
 
         role_map = self._upsert_role_map()
+        permission_map = self._upsert_permission_map()
+        self._bind_role_permissions(role_map=role_map, permission_map=permission_map)
         user_definitions = build_default_users(
             admin_username=username,
             admin_password=password,

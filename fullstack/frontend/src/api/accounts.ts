@@ -16,6 +16,15 @@ export interface SystemPermissionItem {
   updated_at: string
 }
 
+export interface PermissionTemplateItem {
+  template_key: string
+  role_code: string
+  role_name: string
+  template_name: string
+  description: string
+  permission_codes: string[]
+}
+
 export interface RoleItem {
   id: number
   role_code: string
@@ -123,6 +132,11 @@ export async function updateRole(roleId: number, payload: RolePayload) {
 
 export async function fetchPermissions() {
   const response = await http.get<ApiResponse<SystemPermissionItem[]>>("/accounts/permissions/")
+  return response.data
+}
+
+export async function fetchPermissionTemplates() {
+  const response = await http.get<ApiResponse<PermissionTemplateItem[]>>("/accounts/permission-templates/")
   return response.data
 }
 

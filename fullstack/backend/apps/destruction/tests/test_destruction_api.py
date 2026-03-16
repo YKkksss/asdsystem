@@ -3,8 +3,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.models import DataScope, Role, SecurityClearance
-from apps.accounts.services import assign_roles_to_user
+from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
+from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveRecord, ArchiveStatus, ArchiveStorageLocation
 from apps.destruction.models import DestroyApplication, DestroyApplicationStatus
 from apps.organizations.models import Department
@@ -42,6 +42,33 @@ class DestructionApiTests(APITestCase):
             data_scope=DataScope.SELF,
             status=True,
         )
+        self.destroy_approve_permission = SystemPermission.objects.create(
+            permission_code="button.destruction.approve",
+            permission_name="审批销毁申请",
+            permission_type="BUTTON",
+            module_name="destruction",
+            sort_order=340,
+            status=True,
+        )
+        self.destroy_menu_permission = SystemPermission.objects.create(
+            permission_code="menu.destruction_center",
+            permission_name="销毁中心",
+            permission_type="MENU",
+            module_name="destruction",
+            route_path="/destruction/applications",
+            sort_order=100,
+            status=True,
+        )
+        self.destroy_approver_role = Role.objects.create(
+            role_code="DESTROY_APPROVER",
+            role_name="销毁审批人",
+            data_scope=DataScope.ALL,
+            status=True,
+        )
+        assign_permissions_to_role(
+            self.destroy_approver_role,
+            [self.destroy_approve_permission.id, self.destroy_menu_permission.id],
+        )
 
         self.admin_user = User.objects.create_user(
             username="destroy_admin",
@@ -74,6 +101,16 @@ class DestructionApiTests(APITestCase):
             security_clearance_level=SecurityClearance.INTERNAL,
         )
         assign_roles_to_user(self.borrower_user, [self.borrower_role.id])
+        self.destroy_approver_user = User.objects.create_user(
+            username="destroy_approver",
+            password="DestroyApprover123",
+            real_name="销毁审批人甲",
+            dept=self.department,
+            email="destroy-approver@example.com",
+            is_staff=True,
+            security_clearance_level=SecurityClearance.SECRET,
+        )
+        assign_roles_to_user(self.destroy_approver_user, [self.destroy_approver_role.id])
 
         self.location = ArchiveStorageLocation.objects.create(
             warehouse_name="一号库房",
@@ -311,3 +348,27 @@ class DestructionApiTests(APITestCase):
         self.assertEqual(application.status, DestroyApplicationStatus.APPROVED)
         self.assertFalse(hasattr(application, "execution_record"))
         self.assertEqual(archive.status, ArchiveStatus.DESTROY_PENDING)
+
+    def test_user_with_destroy_approve_permission_should_view_and_approve_assigned_application(self) -> None:
+        archive = self.create_archive(archive_code="A2026-D099")
+        application_id = self.create_destroy_application(archive)
+        application = DestroyApplication.objects.get(id=application_id)
+        application.current_approver = self.destroy_approver_user
+        application.save(update_fields=["current_approver_id", "updated_at"])
+
+        self.client.force_authenticate(self.destroy_approver_user)
+        approval_list = self.client.get("/api/v1/destruction/applications/?scope=approval")
+        approve_response = self.client.post(
+            f"/api/v1/destruction/applications/{application_id}/approve/",
+            {
+                "action": "APPROVE",
+                "opinion": "按权限分配完成审批。",
+            },
+            format="json",
+        )
+
+        self.assertEqual(approval_list.status_code, 200)
+        self.assertEqual(len(approval_list.json()["data"]), 1)
+        self.assertEqual(approve_response.status_code, 200)
+        application.refresh_from_db()
+        self.assertEqual(application.status, DestroyApplicationStatus.APPROVED)

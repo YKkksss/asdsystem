@@ -1,7 +1,6 @@
 from django.db.models import Q
 from rest_framework import decorators, mixins, status, viewsets
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
 from apps.borrowing.api.serializers import (
@@ -13,19 +12,30 @@ from apps.borrowing.api.serializers import (
     BorrowReturnConfirmSerializer,
     BorrowReturnSubmitSerializer,
 )
-from apps.borrowing.models import BorrowApplication, BorrowApplicationStatus
+from apps.borrowing.models import BorrowApplication
 from apps.borrowing.services import (
+    BORROW_READ_FALLBACK_ROLES,
+    BORROW_READ_PERMISSION_CODES,
     BIZ_TYPE_BORROW_APPLICATION,
     dispatch_due_borrow_reminders,
-    is_admin_or_auditor_user,
-    is_archive_manager_user,
+    filter_borrow_queryset_by_read_scope,
     sync_overdue_borrow_applications,
 )
 from apps.audit.services import record_audit_log
-from apps.common.permissions import IsArchiveManager
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import success_response
 from apps.notifications.models import SystemNotification
+
+BORROW_CREATE_PERMISSION_CODES = {"button.borrow.create"}
+BORROW_APPROVE_PERMISSION_CODES = {"button.borrow.approve"}
+BORROW_CHECKOUT_PERMISSION_CODES = {"button.borrow.checkout"}
+BORROW_RETURN_SUBMIT_PERMISSION_CODES = {"button.borrow.return.submit"}
+BORROW_RETURN_CONFIRM_PERMISSION_CODES = {"button.borrow.return.confirm"}
+BORROW_CREATE_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST", "BORROWER"}
+BORROW_APPROVE_FALLBACK_ROLES = {"ADMIN"}
+BORROW_ARCHIVE_MANAGER_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
+BORROW_RETURN_SUBMIT_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST", "BORROWER"}
 
 
 class BorrowApplicationViewSet(
@@ -45,13 +55,25 @@ class BorrowApplicationViewSet(
     search_fields = ["application_no", "purpose", "archive__archive_code", "archive__title", "applicant__real_name"]
     ordering_fields = ["id", "created_at", "expected_return_at", "submitted_at", "approved_at", "checkout_at", "returned_at"]
     filterset_fields = ["status", "archive_id", "applicant_id", "applicant_dept_id", "current_approver_id", "is_overdue"]
-
-    def get_permissions(self):
-        if self.action in {"checkout", "confirm_return"}:
-            permission_classes = [IsArchiveManager]
-        else:
-            permission_classes = [IsAuthenticated]
-        return [permission() for permission in permission_classes]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": BORROW_READ_PERMISSION_CODES,
+        "retrieve": BORROW_READ_PERMISSION_CODES,
+        "create": BORROW_CREATE_PERMISSION_CODES,
+        "approve": BORROW_APPROVE_PERMISSION_CODES,
+        "checkout": BORROW_CHECKOUT_PERMISSION_CODES,
+        "submit_return": BORROW_RETURN_SUBMIT_PERMISSION_CODES,
+        "confirm_return": BORROW_RETURN_CONFIRM_PERMISSION_CODES,
+    }
+    action_permission_fallback_roles = {
+        "list": BORROW_READ_FALLBACK_ROLES,
+        "retrieve": BORROW_READ_FALLBACK_ROLES,
+        "create": BORROW_CREATE_FALLBACK_ROLES,
+        "approve": BORROW_APPROVE_FALLBACK_ROLES,
+        "checkout": BORROW_ARCHIVE_MANAGER_FALLBACK_ROLES,
+        "submit_return": BORROW_RETURN_SUBMIT_FALLBACK_ROLES,
+        "confirm_return": BORROW_ARCHIVE_MANAGER_FALLBACK_ROLES,
+    }
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -70,35 +92,12 @@ class BorrowApplicationViewSet(
             biz_type=BIZ_TYPE_BORROW_APPLICATION,
             biz_id__isnull=False,
         ).values_list("biz_id", flat=True)
-
-        scope = (params.get("scope") or "").strip().lower()
-        if scope == "mine":
-            queryset = queryset.filter(applicant_id=user.id)
-        elif scope == "approval":
-            queryset = queryset.filter(
-                current_approver_id=user.id,
-                status=BorrowApplicationStatus.PENDING_APPROVAL,
-            )
-        elif scope == "checkout":
-            if not is_archive_manager_user(user):
-                queryset = queryset.none()
-            else:
-                queryset = queryset.filter(status=BorrowApplicationStatus.APPROVED)
-        elif scope == "return":
-            if is_archive_manager_user(user):
-                queryset = queryset.filter(return_record__return_status="SUBMITTED")
-            else:
-                queryset = queryset.filter(applicant_id=user.id)
-        elif scope == "all":
-            if not (is_archive_manager_user(user) or is_admin_or_auditor_user(user)):
-                queryset = queryset.filter(Q(applicant_id=user.id) | Q(id__in=notified_application_ids))
-        else:
-            if not (is_archive_manager_user(user) or is_admin_or_auditor_user(user)):
-                queryset = queryset.filter(
-                    Q(applicant_id=user.id)
-                    | Q(current_approver_id=user.id)
-                    | Q(id__in=notified_application_ids)
-                )
+        queryset = filter_borrow_queryset_by_read_scope(
+            queryset,
+            user=user,
+            scope=params.get("scope"),
+            notified_application_ids=notified_application_ids,
+        )
 
         keyword = (params.get("keyword") or "").strip()
         if keyword:
@@ -221,7 +220,9 @@ class BorrowApplicationViewSet(
 
 
 class BorrowReminderDispatchAPIView(APIView):
-    permission_classes = [IsArchiveManager]
+    permission_classes = [HasConfiguredSystemPermission]
+    required_permission_codes = {"button.notification.reminder.dispatch"}
+    permission_fallback_roles = {"ADMIN", "ARCHIVIST"}
 
     def post(self, request):
         reminder_records = dispatch_due_borrow_reminders()

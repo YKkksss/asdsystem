@@ -1,6 +1,7 @@
 # 显示名称|Django 测试标签
 认证接口测试|apps.accounts.tests.test_auth_api
 系统管理接口测试|apps.accounts.tests.test_management_api
+系统工作台接口测试|apps.system.tests.test_dashboard_api
 档案接口测试|apps.archives.tests.test_archive_api
 组织接口测试|apps.organizations.tests.test_department_api
 系统健康接口测试|apps.system.tests.test_health_api

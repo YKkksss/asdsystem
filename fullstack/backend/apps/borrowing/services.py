@@ -8,7 +8,7 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.services import record_audit_log
 from apps.archives.models import ArchiveRecord, ArchiveStatus, ArchiveStorageLocation
@@ -48,6 +48,32 @@ RETURN_ALLOWED_APPLICATION_STATUSES = {
 }
 ALLOWED_RETURN_ATTACHMENT_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
 BIZ_TYPE_BORROW_APPLICATION = "borrow_application"
+BORROW_READ_PERMISSION_CODES = {
+    "menu.borrow_center",
+    "menu.borrow_approval",
+    "menu.borrow_checkout",
+    "menu.borrow_return",
+    "menu.report_center",
+    "menu.audit_log",
+    "button.borrow.create",
+    "button.borrow.approve",
+    "button.borrow.checkout",
+    "button.borrow.return.submit",
+    "button.borrow.return.confirm",
+}
+BORROW_READ_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST", "BORROWER", "AUDITOR"}
+BORROW_CENTER_READ_PERMISSION_CODES = {"menu.borrow_center", "button.borrow.create"}
+BORROW_APPROVAL_READ_PERMISSION_CODES = {"menu.borrow_approval", "button.borrow.approve"}
+BORROW_CHECKOUT_READ_PERMISSION_CODES = {"menu.borrow_checkout", "button.borrow.checkout"}
+BORROW_RETURN_SUBMIT_READ_PERMISSION_CODES = {"menu.borrow_return", "button.borrow.return.submit"}
+BORROW_RETURN_CONFIRM_READ_PERMISSION_CODES = {"menu.borrow_return", "button.borrow.return.confirm"}
+BORROW_ALL_READ_PERMISSION_CODES = {
+    "menu.borrow_approval",
+    "menu.borrow_checkout",
+    "button.borrow.return.confirm",
+    "menu.report_center",
+    "menu.audit_log",
+}
 
 
 def _has_any_role(user, role_codes: set[str]) -> bool:
@@ -60,18 +86,121 @@ def _has_any_role(user, role_codes: set[str]) -> bool:
     return user.roles.filter(role_code__in=role_codes, status=True).exists()
 
 
+def _has_any_permission(user, permission_codes: set[str]) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    if not hasattr(user, "roles"):
+        return False
+    return user.roles.filter(
+        status=True,
+        permissions__permission_code__in=permission_codes,
+        permissions__status=True,
+    ).exists()
+
+
 def is_archive_manager_user(user) -> bool:
-    return _has_any_role(user, {"ADMIN", "ARCHIVIST"})
+    return _has_any_role(user, {"ADMIN", "ARCHIVIST"}) or _has_any_permission(
+        user,
+        {"button.borrow.checkout", "button.borrow.return.confirm", "button.notification.reminder.dispatch"},
+    )
 
 
 def is_admin_or_auditor_user(user) -> bool:
     return _has_any_role(user, {"ADMIN", "AUDITOR"})
 
 
+def has_borrow_center_access(user) -> bool:
+    return _has_any_role(user, {"ADMIN", "ARCHIVIST", "BORROWER"}) or _has_any_permission(
+        user,
+        BORROW_CENTER_READ_PERMISSION_CODES,
+    )
+
+
+def has_borrow_approval_access(user) -> bool:
+    return _has_any_role(user, {"ADMIN"}) or _has_any_permission(user, BORROW_APPROVAL_READ_PERMISSION_CODES)
+
+
+def has_borrow_checkout_access(user) -> bool:
+    return is_archive_manager_user(user) or _has_any_permission(user, BORROW_CHECKOUT_READ_PERMISSION_CODES)
+
+
+def has_borrow_return_submit_access(user) -> bool:
+    return _has_any_role(user, {"ADMIN", "ARCHIVIST", "BORROWER"}) or _has_any_permission(
+        user,
+        BORROW_RETURN_SUBMIT_READ_PERMISSION_CODES,
+    )
+
+
+def has_borrow_return_confirm_access(user) -> bool:
+    return is_archive_manager_user(user) or _has_any_permission(user, BORROW_RETURN_CONFIRM_READ_PERMISSION_CODES)
+
+
+def has_borrow_all_access(user) -> bool:
+    return _has_any_role(user, {"ADMIN", "ARCHIVIST", "AUDITOR"}) or _has_any_permission(
+        user,
+        BORROW_ALL_READ_PERMISSION_CODES,
+    )
+
+
+def filter_borrow_queryset_by_read_scope(
+    queryset,
+    *,
+    user,
+    scope: str | None,
+    notified_application_ids,
+):
+    normalized_scope = (scope or "").strip().lower()
+    notified_application_ids = list(notified_application_ids or [])
+
+    if normalized_scope == "mine":
+        if not has_borrow_center_access(user) and not has_borrow_return_submit_access(user):
+            raise PermissionDenied("当前账号无权查看个人借阅申请列表。")
+        return queryset.filter(applicant_id=user.id)
+
+    if normalized_scope == "approval":
+        if not has_borrow_approval_access(user):
+            raise PermissionDenied("当前账号无权查看待审批借阅申请。")
+        return queryset.filter(
+            current_approver_id=user.id,
+            status=BorrowApplicationStatus.PENDING_APPROVAL,
+        )
+
+    if normalized_scope == "checkout":
+        if not has_borrow_checkout_access(user):
+            raise PermissionDenied("当前账号无权查看待出库借阅申请。")
+        return queryset.filter(status=BorrowApplicationStatus.APPROVED)
+
+    if normalized_scope == "return":
+        if not has_borrow_return_confirm_access(user):
+            raise PermissionDenied("当前账号无权查看待确认归还记录。")
+        return queryset.filter(return_record__return_status=BorrowReturnStatus.SUBMITTED)
+
+    if normalized_scope == "all":
+        if not has_borrow_all_access(user):
+            raise PermissionDenied("当前账号无权查看全部借阅申请。")
+        return queryset
+
+    if has_borrow_all_access(user):
+        return queryset
+
+    visibility_filter = Q(applicant_id=user.id) | Q(current_approver_id=user.id)
+    if notified_application_ids:
+        visibility_filter |= Q(id__in=notified_application_ids)
+    if has_borrow_checkout_access(user):
+        visibility_filter |= Q(status=BorrowApplicationStatus.APPROVED)
+    if has_borrow_return_confirm_access(user):
+        visibility_filter |= Q(return_record__return_status=BorrowReturnStatus.SUBMITTED)
+    return queryset.filter(visibility_filter)
+
+
 def can_user_approve_borrow_application(user, application: BorrowApplication) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
-    if is_archive_manager_user(user):
+    if not has_borrow_approval_access(user):
+        return False
+    if getattr(user, "is_superuser", False):
         return True
     return application.current_approver_id == user.id
 
@@ -79,13 +208,15 @@ def can_user_approve_borrow_application(user, application: BorrowApplication) ->
 def can_user_submit_borrow_return(user, application: BorrowApplication) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
+    if not has_borrow_return_submit_access(user):
+        return False
     if is_archive_manager_user(user):
         return True
     return application.applicant_id == user.id
 
 
 def can_user_confirm_borrow_return(user) -> bool:
-    return is_archive_manager_user(user)
+    return has_borrow_return_confirm_access(user)
 
 
 def build_borrow_application_no() -> str:
@@ -136,7 +267,15 @@ def notify_borrow_application_result(
 def notify_borrow_return_submitted(application: BorrowApplication, returned_by) -> None:
     archive_managers = (
         User.objects.filter(status=True)
-        .filter(Q(roles__role_code="ADMIN") | Q(roles__role_code="ARCHIVIST"), roles__status=True)
+        .filter(
+            Q(roles__role_code="ADMIN", roles__status=True)
+            | Q(roles__role_code="ARCHIVIST", roles__status=True)
+            | Q(
+                roles__permissions__permission_code="button.borrow.return.confirm",
+                roles__permissions__status=True,
+                roles__status=True,
+            )
+        )
         .distinct()
         .order_by("id")
     )

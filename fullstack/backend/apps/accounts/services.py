@@ -12,6 +12,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.audit.models import AuditResultStatus
 from apps.audit.services import record_audit_log
 from apps.accounts.models import Role, RolePermission, SystemPermission, UserRole
+from apps.notifications.models import NotificationType
+from apps.notifications.services import create_system_notification
 
 
 logger = logging.getLogger(__name__)
@@ -178,7 +180,11 @@ def refresh_access_token(refresh_token: str, request=None) -> dict:
 def build_user_profile(user: User) -> dict:
     roles = list(user.roles.filter(status=True).values("id", "role_code", "role_name", "data_scope"))
     permissions = list(
-        SystemPermission.objects.filter(permission_roles__role__users=user, status=True)
+        SystemPermission.objects.filter(
+            permission_roles__role__users=user,
+            permission_roles__role__status=True,
+            status=True,
+        )
         .distinct()
         .values("id", "permission_code", "permission_name", "permission_type", "module_name", "route_path")
     )
@@ -230,4 +236,11 @@ def unlock_user(user: User, operator=None, request=None) -> None:
         biz_id=user.id,
         target_repr=user.username,
         request=request,
+    )
+    operator_name = getattr(operator, "real_name", "") or getattr(operator, "username", "") or "管理员"
+    create_system_notification(
+        user=user,
+        notification_type=NotificationType.SYSTEM,
+        title="账号已解锁",
+        content=f"{operator_name} 已为你解除登录锁定，请重新使用当前账号登录系统。",
     )

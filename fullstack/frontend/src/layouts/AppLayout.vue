@@ -4,19 +4,31 @@
       <div class="brand-block">
         <p class="brand-tag">{{ appStore.stageTitle }}</p>
         <h1>{{ appStore.appTitle }}</h1>
-        <p class="brand-text">围绕档案全生命周期管理构建统一工作台。</p>
+        <p class="brand-text">统一承接档案、借阅、归还、销毁与监督业务入口。</p>
       </div>
 
       <nav class="menu-list">
-        <RouterLink
-          v-for="item in menuItems"
-          :key="item.path"
-          class="menu-item"
-          :to="item.path"
+        <a-menu
+          class="sidebar-menu"
+          mode="inline"
+          :open-keys="openMenuKeys"
+          :selected-keys="selectedMenuKeys"
+          @openChange="handleOpenChange"
         >
-          <span>{{ item.name }}</span>
-          <small>{{ item.caption }}</small>
-        </RouterLink>
+          <template v-for="entry in accessibleNavigationEntries" :key="entry.key">
+            <a-menu-item v-if="entry.kind === 'item'" :key="entry.key">
+              <RouterLink :to="entry.path">{{ entry.name }}</RouterLink>
+            </a-menu-item>
+
+            <a-sub-menu v-else :key="entry.key">
+              <template #title>{{ entry.title }}</template>
+
+              <a-menu-item v-for="item in entry.items" :key="item.key">
+                <RouterLink :to="item.path">{{ item.name }}</RouterLink>
+              </a-menu-item>
+            </a-sub-menu>
+          </template>
+        </a-menu>
       </nav>
     </aside>
 
@@ -42,7 +54,7 @@
           >
             退出登录
           </a-button>
-          <RouterLink v-else class="login-link" to="/login">查看登录页</RouterLink>
+          <RouterLink v-else class="login-link login-link-text" to="/login">查看登录页</RouterLink>
         </div>
       </header>
 
@@ -60,84 +72,87 @@ import { RouterLink, RouterView } from "vue-router"
 import { useRoute, useRouter } from "vue-router"
 
 import { logout } from "@/api/auth"
+import { flattenNavigationItems, navigationEntries, type NavigationEntry, type NavigationItem } from "@/config/navigation"
 import { useAppStore } from "@/stores/app"
 import { useAuthStore } from "@/stores/auth"
+import { profileHasAccess } from "@/utils/access"
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const logoutSubmitting = ref(false)
+const openMenuKeys = ref<string[]>([])
 const ROUTE_ACCESS_NOTICE_KEY = "asd_system_route_access_notice"
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const accessibleNavigationEntries = computed<NavigationEntry[]>(() =>
+  navigationEntries
+    .map((entry) => {
+      if (entry.kind === "item") {
+        return profileHasAccess(authStore.profile, entry) ? entry : null
+      }
+
+      const visibleItems = entry.items.filter((item) => profileHasAccess(authStore.profile, item))
+      if (!visibleItems.length) {
+        return null
+      }
+      return {
+        ...entry,
+        items: visibleItems,
+      }
+    })
+    .filter((entry): entry is NavigationEntry => Boolean(entry)),
 )
 
-const canViewAudit = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "AUDITOR"].includes(role.role_code))),
+const accessibleNavigationItems = computed(() => flattenNavigationItems(accessibleNavigationEntries.value))
+const accessibleGroupKeys = computed(() =>
+  accessibleNavigationEntries.value
+    .filter((entry): entry is Extract<NavigationEntry, { kind: "group" }> => entry.kind === "group")
+    .map((entry) => entry.key),
 )
-
-const canViewReports = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "AUDITOR", "ARCHIVIST"].includes(role.role_code))),
-)
-
-const canViewDestruction = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "AUDITOR", "ARCHIVIST"].includes(role.role_code))),
-)
-
-const canManageSystem = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => role.role_code === "ADMIN")),
-)
-
-const menuItems = computed(() => {
-  const items = [
-    { path: "/", name: "工作台", caption: "查看当前交付阶段" },
-    { path: "/archives/records", name: "档案检索", caption: "按组合条件检索并查看脱敏结果" },
-    { path: "/borrowing/applications", name: "借阅申请", caption: "发起借阅并查看流转记录" },
-    { path: "/borrowing/approvals", name: "借阅审批", caption: "处理当前待审批借阅申请" },
-    { path: "/borrowing/returns", name: "归还中心", caption: "提交归还并处理验收入库" },
-    { path: "/notifications/messages", name: "通知中心", caption: "查看催还提醒和系统消息" },
-  ]
-
-  if (canManageArchives.value) {
-    items.push(
-      { path: "/archives/records/create", name: "新建档案", caption: "录入入库主数据" },
-      { path: "/archives/locations", name: "实体位置", caption: "维护库房柜架盒位" },
-      { path: "/digitization/scan-tasks", name: "扫描任务", caption: "分配任务并上传扫描文件" },
-      { path: "/borrowing/checkout", name: "出库登记", caption: "办理审批通过档案的出库" },
-    )
-  }
-
-  if (canViewDestruction.value) {
-    items.push(
-      { path: "/destruction/applications", name: "销毁中心", caption: "查看销毁流转并登记执行结果" },
-    )
-  }
-
-  if (canViewReports.value) {
-    items.push(
-      { path: "/reports/center", name: "报表中心", caption: "查看借阅统计并导出汇总报表" },
-    )
-  }
-
-  if (canViewAudit.value) {
-    items.push(
-      { path: "/audit/logs", name: "审计日志", caption: "查看关键操作留痕和文件访问风控记录" },
-    )
-  }
-
-  if (canManageSystem.value) {
-    items.push(
-      { path: "/system/management", name: "系统管理", caption: "维护用户、角色、组织与运行状态" },
-    )
-  }
-
-  return items
-})
 
 const currentTitle = computed(() => String(route.meta.title || appStore.titleWithStage))
 const currentDescription = computed(() => String(route.meta.description || appStore.pageDescription))
+
+const activeNavigationItem = computed(() => {
+  let matchedItem: NavigationItem | null = null
+  let matchedScore = -1
+
+  for (const item of accessibleNavigationItems.value) {
+    if (item.path === "/") {
+      if (route.path === "/" && matchedScore < 1) {
+        matchedItem = item
+        matchedScore = 1
+      }
+      continue
+    }
+
+    const matchedPrefix = item.activePrefixes
+      .filter((prefix) => route.path.startsWith(prefix))
+      .sort((left, right) => right.length - left.length)[0]
+
+    if (matchedPrefix && matchedPrefix.length > matchedScore) {
+      matchedItem = item
+      matchedScore = matchedPrefix.length
+    }
+  }
+
+  return matchedItem
+})
+
+const activeParentKey = computed(() => {
+  const currentItem = activeNavigationItem.value
+  if (!currentItem) {
+    return null
+  }
+
+  const parentEntry = accessibleNavigationEntries.value.find(
+    (entry) => entry.kind === "group" && entry.items.some((item) => item.key === currentItem.key),
+  )
+  return parentEntry?.key || null
+})
+
+const selectedMenuKeys = computed(() => (activeNavigationItem.value ? [activeNavigationItem.value.key] : []))
 
 function consumeRouteAccessNotice() {
   const notice = window.sessionStorage.getItem(ROUTE_ACCESS_NOTICE_KEY)
@@ -146,6 +161,21 @@ function consumeRouteAccessNotice() {
   }
   window.sessionStorage.removeItem(ROUTE_ACCESS_NOTICE_KEY)
   message.warning(notice)
+}
+
+function normalizeOpenMenuKeys(keys: string[]) {
+  const visibleKeySet = new Set(accessibleGroupKeys.value)
+  const normalizedKeys = keys.filter((key) => visibleKeySet.has(key))
+
+  if (activeParentKey.value && !normalizedKeys.includes(activeParentKey.value)) {
+    normalizedKeys.push(activeParentKey.value)
+  }
+
+  return normalizedKeys
+}
+
+function handleOpenChange(keys: string[]) {
+  openMenuKeys.value = normalizeOpenMenuKeys(keys)
 }
 
 async function handleLogout() {
@@ -164,6 +194,14 @@ async function handleLogout() {
 }
 
 watch(
+  [accessibleGroupKeys, activeParentKey],
+  () => {
+    openMenuKeys.value = normalizeOpenMenuKeys(openMenuKeys.value)
+  },
+  { immediate: true },
+)
+
+watch(
   () => route.fullPath,
   () => {
     consumeRouteAccessNotice()
@@ -175,7 +213,7 @@ watch(
 <style scoped>
 .layout-shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -184,11 +222,18 @@ watch(
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 28px 24px;
+  overflow: hidden;
+  padding: 28px 20px 24px;
   background:
     linear-gradient(180deg, rgba(10, 113, 82, 0.96) 0%, rgba(23, 84, 70, 0.94) 100%),
     #0a7152;
   color: #f8fffc;
+}
+
+.brand-block {
+  display: grid;
+  gap: 12px;
+  padding: 0 4px;
 }
 
 .brand-block h1 {
@@ -198,7 +243,7 @@ watch(
 
 .brand-tag {
   width: fit-content;
-  margin: 0 0 12px;
+  margin: 0;
   padding: 6px 12px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.14);
@@ -207,20 +252,18 @@ watch(
 }
 
 .brand-text {
-  margin: 12px 0 0;
+  margin: 0;
   color: rgba(248, 255, 252, 0.78);
   line-height: 1.7;
 }
 
 .menu-list {
-  display: grid;
   flex: 1;
   min-height: 0;
-  gap: 12px;
-  margin-top: 32px;
+  margin-top: 28px;
   overflow-y: auto;
-  padding-right: 6px;
-  align-content: start;
+  padding-right: 4px;
+  padding-bottom: 8px;
   scrollbar-gutter: stable;
 }
 
@@ -237,28 +280,74 @@ watch(
   background: transparent;
 }
 
-.menu-item {
-  display: grid;
-  gap: 4px;
-  padding: 14px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.06);
-  transition: transform 0.2s ease, background-color 0.2s ease;
+.sidebar-menu {
+  background: transparent;
+  color: rgba(248, 255, 252, 0.86);
 }
 
-.menu-item:hover {
-  transform: translateX(3px);
-  background: rgba(255, 255, 255, 0.1);
+.sidebar-menu :deep(.ant-menu) {
+  background: transparent;
+  border-inline-end: none;
+  color: rgba(248, 255, 252, 0.86);
 }
 
-.menu-item.router-link-active {
-  border-color: rgba(255, 255, 255, 0.32);
+.sidebar-menu :deep(.ant-menu-sub.ant-menu-inline) {
+  background: transparent;
+}
+
+.sidebar-menu :deep(.ant-menu-item),
+.sidebar-menu :deep(.ant-menu-submenu-title) {
+  height: 46px;
+  margin: 6px 0;
+  line-height: 46px;
+  border-radius: 14px;
+  color: rgba(248, 255, 252, 0.82);
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.sidebar-menu :deep(.ant-menu-item:hover),
+.sidebar-menu :deep(.ant-menu-submenu-title:hover) {
+  color: #91caff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-menu :deep(.ant-menu-item:hover .ant-menu-title-content),
+.sidebar-menu :deep(.ant-menu-item:hover .ant-menu-title-content a),
+.sidebar-menu :deep(.ant-menu-submenu-title:hover .ant-menu-title-content) {
+  color: #91caff;
+}
+
+.sidebar-menu :deep(.ant-menu-item-selected) {
+  color: #ffffff;
   background: rgba(255, 255, 255, 0.16);
 }
 
-.menu-item small {
-  color: rgba(248, 255, 252, 0.7);
+.sidebar-menu :deep(.ant-menu-submenu-selected > .ant-menu-submenu-title) {
+  color: #ffffff;
+}
+
+.sidebar-menu :deep(.ant-menu-title-content) {
+  font-weight: 500;
+}
+
+.sidebar-menu :deep(.ant-menu-title-content a) {
+  display: block;
+  width: 100%;
+  color: inherit;
+}
+
+.sidebar-menu :deep(.ant-menu-title-content a:hover) {
+  color: inherit;
+}
+
+.sidebar-menu :deep(.ant-menu-submenu-title .ant-menu-title-content) {
+  letter-spacing: 0.02em;
+}
+
+.sidebar-menu :deep(.ant-menu-submenu-arrow),
+.sidebar-menu :deep(.ant-menu-submenu-arrow::before),
+.sidebar-menu :deep(.ant-menu-submenu-arrow::after) {
+  color: rgba(248, 255, 252, 0.78);
 }
 
 .layout-main {
@@ -276,7 +365,7 @@ watch(
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: flex-start;
+  align-items: center;
   margin-bottom: 20px;
 }
 
@@ -312,18 +401,30 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 108px;
   height: 40px;
   padding: 0 18px;
   border-radius: 999px;
-  background: #0a7152;
-  color: #ffffff;
   line-height: 1;
   white-space: nowrap;
 }
 
-.login-link :deep(span) {
+.login-link.ant-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+}
+
+.login-link.ant-btn :deep(span) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.login-link-text {
+  background: #0a7152;
+  color: #ffffff;
 }
 
 .content-panel {
@@ -345,12 +446,17 @@ watch(
     overflow: visible;
   }
 
+  .layout-sidebar,
   .layout-main {
     height: auto;
+  }
+
+  .layout-main {
     overflow: visible;
     padding: 16px;
   }
 
+  .menu-list,
   .content-panel {
     overflow: visible;
     min-height: auto;
@@ -358,6 +464,7 @@ watch(
 
   .topbar {
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .action-group {

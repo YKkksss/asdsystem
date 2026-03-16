@@ -9,7 +9,7 @@
     </div>
 
     <a-row :gutter="[20, 20]">
-      <a-col :xs="24" :xl="canManageArchives ? 12 : 24">
+      <a-col v-if="canSubmitReturns" :xs="24" :xl="canConfirmReturns ? 12 : 24">
         <a-card :bordered="false" class="panel-card">
           <template #title>我的归还任务</template>
 
@@ -59,7 +59,7 @@
         </a-card>
       </a-col>
 
-      <a-col v-if="canManageArchives" :xs="24" :xl="12">
+      <a-col v-if="canConfirmReturns" :xs="24" :xl="12">
         <a-card :bordered="false" class="panel-card">
           <template #title>归还确认待办</template>
 
@@ -240,9 +240,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref, watch } from "vue"
 import { message } from "ant-design-vue"
 import type { SelectProps } from "ant-design-vue"
+import { useRoute, useRouter } from "vue-router"
 
 import { fetchArchiveLocations } from "@/api/archives"
 import {
@@ -258,9 +259,16 @@ import {
   type BorrowApplicationDetail,
 } from "@/api/borrowing"
 import { useAuthStore } from "@/stores/auth"
+import {
+  ARCHIVE_MANAGER_FALLBACK_ROLES,
+  BORROW_RETURN_FALLBACK_ROLES,
+  profileHasAnyPermission,
+} from "@/utils/access"
 import { getRequestErrorMessage, getRequestErrorStatus } from "@/utils/request"
 
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 
 const statusLabelMap: Record<string, string> = {
   CHECKED_OUT: "借出中",
@@ -280,8 +288,12 @@ const returnStatusLabelMap: Record<string, string> = {
   REJECTED: "归还验收不通过",
 }
 
-const canManageArchives = computed(() =>
-  Boolean(authStore.profile?.roles.some((role) => ["ADMIN", "ARCHIVIST"].includes(role.role_code))),
+const canSubmitReturns = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.borrow.return.submit"], BORROW_RETURN_FALLBACK_ROLES),
+)
+
+const canConfirmReturns = computed(() =>
+  profileHasAnyPermission(authStore.profile, ["button.borrow.return.confirm"], ARCHIVE_MANAGER_FALLBACK_ROLES),
 )
 
 const myColumns = [
@@ -352,7 +364,7 @@ const summaryCards = computed(() => [
   {
     label: "待确认",
     value: confirmPagination.total,
-    caption: "等待档案员验收确认的归还记录总数量",
+    caption: "等待具备归还确认权限的人员验收处理的归还记录总数量",
   },
 ])
 
@@ -407,9 +419,39 @@ function handleHandoverFileChange(event: Event) {
 }
 
 function openReturnModal(application: BorrowApplication) {
+  if (!canSubmitReturns.value) {
+    message.warning("当前账号无权提交归还。")
+    return
+  }
   selectedReturnApplication.value = application
   resetReturnForm()
   returnModalOpen.value = true
+}
+
+async function openReturnModalById(applicationId: number) {
+  if (!canSubmitReturns.value) {
+    message.warning("当前账号无权提交归还。")
+    return
+  }
+
+  try {
+    const response = await fetchBorrowApplicationDetail(applicationId)
+    selectedReturnApplication.value = response.data
+    resetReturnForm()
+    returnModalOpen.value = true
+  } catch (error) {
+    const status = getRequestErrorStatus(error)
+    if (status === 404) {
+      message.error("借阅申请不存在或状态已变化，请刷新列表后重试。")
+      await Promise.all([loadMyApplications(), loadPendingConfirmApplications()])
+      return
+    }
+    if (status === 403) {
+      message.error("当前账号无权提交该归还记录。")
+      return
+    }
+    handleRequestError(error, "加载归还详情失败。")
+  }
 }
 
 function handleMyTableChange(page: number, pageSize: number) {
@@ -425,6 +467,11 @@ function handleConfirmTableChange(page: number, pageSize: number) {
 }
 
 async function openConfirmModal(application: BorrowApplication) {
+  if (!canConfirmReturns.value) {
+    message.warning("当前账号无权处理归还确认。")
+    return
+  }
+
   confirmModalOpen.value = true
   confirmDetailLoading.value = true
   resetConfirmForm()
@@ -451,7 +498,65 @@ async function openConfirmModal(application: BorrowApplication) {
   }
 }
 
+async function openConfirmModalById(applicationId: number) {
+  if (!canConfirmReturns.value) {
+    message.warning("当前账号无权处理归还确认。")
+    return
+  }
+
+  confirmModalOpen.value = true
+  confirmDetailLoading.value = true
+  resetConfirmForm()
+  selectedConfirmApplication.value = null
+  try {
+    const response = await fetchBorrowApplicationDetail(applicationId)
+    selectedConfirmApplication.value = response.data
+  } catch (error) {
+    confirmModalOpen.value = false
+    const status = getRequestErrorStatus(error)
+    if (status === 404) {
+      message.error("归还确认记录不存在或状态已变化，请刷新列表后重试。")
+      await Promise.all([loadMyApplications(), loadPendingConfirmApplications()])
+      return
+    }
+    if (status === 403) {
+      message.error("当前账号无权处理该归还记录。")
+      await loadPendingConfirmApplications()
+      return
+    }
+    handleRequestError(error, "加载归还详情失败。")
+  } finally {
+    confirmDetailLoading.value = false
+  }
+}
+
+async function consumeRouteBorrowTask() {
+  const rawApplicationId = route.query.applicationId
+  const applicationId = Number(rawApplicationId)
+  if (!Number.isInteger(applicationId) || applicationId <= 0) {
+    return
+  }
+
+  const mode = String(route.query.mode || "submit")
+  if (mode === "confirm") {
+    await openConfirmModalById(applicationId)
+  } else {
+    await openReturnModalById(applicationId)
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.applicationId
+  delete nextQuery.mode
+  await router.replace({ query: nextQuery })
+}
+
 async function loadMyApplications() {
+  if (!canSubmitReturns.value) {
+    myApplications.value = []
+    myPagination.total = 0
+    return
+  }
+
   myLoading.value = true
   try {
     const response = await fetchBorrowApplicationsPage({
@@ -472,7 +577,7 @@ async function loadMyApplications() {
 }
 
 async function loadPendingConfirmApplications() {
-  if (!canManageArchives.value) {
+  if (!canConfirmReturns.value) {
     pendingConfirmApplications.value = []
     confirmPagination.total = 0
     return
@@ -497,7 +602,7 @@ async function loadPendingConfirmApplications() {
 }
 
 async function loadLocationOptions() {
-  if (!canManageArchives.value) {
+  if (!canConfirmReturns.value) {
     return
   }
 
@@ -516,6 +621,11 @@ async function loadLocationOptions() {
 }
 
 async function handleSubmitReturn() {
+  if (!canSubmitReturns.value) {
+    message.warning("当前账号无权提交归还。")
+    return
+  }
+
   if (!selectedReturnApplication.value) {
     return
   }
@@ -571,6 +681,11 @@ async function handleSubmitReturn() {
 }
 
 async function handleSubmitConfirm() {
+  if (!canConfirmReturns.value) {
+    message.warning("当前账号无权处理归还确认。")
+    return
+  }
+
   if (!selectedConfirmApplication.value) {
     return
   }
@@ -620,10 +735,22 @@ function handleRequestError(error: unknown, fallbackMessage: string) {
 }
 
 onMounted(() => {
-  void loadMyApplications()
-  void loadPendingConfirmApplications()
-  void loadLocationOptions()
+  if (canSubmitReturns.value) {
+    void loadMyApplications()
+  }
+  if (canConfirmReturns.value) {
+    void loadPendingConfirmApplications()
+    void loadLocationOptions()
+  }
 })
+
+watch(
+  () => [route.query.applicationId, route.query.mode],
+  () => {
+    void consumeRouteBorrowTask()
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>

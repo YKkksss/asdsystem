@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -52,16 +53,37 @@ def _has_any_role(user, role_codes: set[str]) -> bool:
     return user.roles.filter(role_code__in=role_codes, status=True).exists()
 
 
+def _has_any_permission(user, permission_codes: set[str]) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    if not hasattr(user, "roles"):
+        return False
+    return user.roles.filter(
+        status=True,
+        permissions__permission_code__in=permission_codes,
+        permissions__status=True,
+    ).exists()
+
+
 def is_archive_manager_user(user) -> bool:
-    return _has_any_role(user, {"ADMIN", "ARCHIVIST"})
+    return _has_any_role(user, {"ADMIN", "ARCHIVIST"}) or _has_any_permission(
+        user,
+        {"button.destruction.create", "button.destruction.execute"},
+    )
 
 
 def is_system_admin_user(user) -> bool:
     return _has_any_role(user, {"ADMIN"})
 
 
+def has_destroy_approval_permission(user) -> bool:
+    return is_system_admin_user(user) or _has_any_permission(user, {"button.destruction.approve"})
+
+
 def is_admin_or_auditor_user(user) -> bool:
-    return _has_any_role(user, {"ADMIN", "AUDITOR"})
+    return _has_any_role(user, {"ADMIN", "AUDITOR"}) or has_destroy_approval_permission(user)
 
 
 def can_user_approve_destroy_application(user, application: DestroyApplication) -> bool:
@@ -69,7 +91,7 @@ def can_user_approve_destroy_application(user, application: DestroyApplication) 
         return False
     if getattr(user, "is_superuser", False):
         return True
-    if not is_system_admin_user(user):
+    if not has_destroy_approval_permission(user):
         return False
     if application.current_approver_id is None:
         return True
@@ -90,7 +112,15 @@ def build_destroy_application_no() -> str:
 
 def resolve_destroy_approver() -> User:
     approver = (
-        User.objects.filter(status=True, roles__role_code="ADMIN", roles__status=True)
+        User.objects.filter(status=True)
+        .filter(
+            Q(roles__role_code="ADMIN", roles__status=True)
+            | Q(
+                roles__permissions__permission_code="button.destruction.approve",
+                roles__permissions__status=True,
+                roles__status=True,
+            )
+        )
         .distinct()
         .order_by("id")
         .first()

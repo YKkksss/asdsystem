@@ -1,10 +1,9 @@
 from django.contrib.auth import get_user_model
 from rest_framework import status, viewsets
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-from apps.common.permissions import IsArchiveManager
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.pagination import OptionalPaginationListMixin
 from apps.common.response import error_response, success_response
 from apps.digitization.api.serializers import (
@@ -19,16 +18,27 @@ from apps.digitization.services import upload_files_to_scan_task_item
 
 User = get_user_model()
 
+SCAN_TASK_READ_PERMISSION_CODES = {"menu.scan_task"}
+SCAN_TASK_MANAGE_PERMISSION_CODES = {"button.scan_task.manage"}
+SCAN_TASK_FALLBACK_ROLES = {"ADMIN", "ARCHIVIST"}
+
 
 class ScanTaskViewSet(OptionalPaginationListMixin, viewsets.GenericViewSet):
     queryset = ScanTask.objects.order_by("-id")
     search_fields = ["task_no", "task_name", "remark"]
     ordering_fields = ["id", "created_at", "started_at", "finished_at"]
     filterset_fields = ["status", "assigned_user_id"]
-
-    def get_permissions(self):
-        permission_classes = [IsArchiveManager]
-        return [permission() for permission in permission_classes]
+    permission_classes = [HasConfiguredSystemPermission]
+    action_required_permission_codes = {
+        "list": SCAN_TASK_READ_PERMISSION_CODES,
+        "retrieve": SCAN_TASK_READ_PERMISSION_CODES,
+        "create": SCAN_TASK_MANAGE_PERMISSION_CODES,
+    }
+    action_permission_fallback_roles = {
+        "list": SCAN_TASK_FALLBACK_ROLES,
+        "retrieve": SCAN_TASK_FALLBACK_ROLES,
+        "create": SCAN_TASK_FALLBACK_ROLES,
+    }
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -72,7 +82,9 @@ class ScanTaskViewSet(OptionalPaginationListMixin, viewsets.GenericViewSet):
 
 
 class ScanTaskAssigneeAPIView(APIView):
-    permission_classes = [IsArchiveManager]
+    permission_classes = [HasConfiguredSystemPermission]
+    required_permission_codes = SCAN_TASK_READ_PERMISSION_CODES
+    permission_fallback_roles = SCAN_TASK_FALLBACK_ROLES
 
     def get(self, request):
         users = User.objects.filter(status=True, is_staff=True).order_by("id").values(
@@ -86,7 +98,9 @@ class ScanTaskAssigneeAPIView(APIView):
 
 
 class ScanTaskItemUploadAPIView(APIView):
-    permission_classes = [IsArchiveManager]
+    permission_classes = [HasConfiguredSystemPermission]
+    required_permission_codes = SCAN_TASK_MANAGE_PERMISSION_CODES
+    permission_fallback_roles = SCAN_TASK_FALLBACK_ROLES
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request, item_id: int):
