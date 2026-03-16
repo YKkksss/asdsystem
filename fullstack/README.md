@@ -144,7 +144,8 @@ docker compose -f docker/docker-compose.deploy.yaml up -d --build
 2. 首次启动会自动执行迁移与基础数据初始化
 3. 账号清单同样会输出到 `runtime/deployment_runtime/accounts.md`
 4. 默认关闭 `DEBUG` 与全量 CORS，并通过前端 Nginx 固定上游 Host，保证本机和常见内网访问可直接使用
-5. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
+5. Docker 前端容器会直接提供 `/media/` 与 `/static/`，条码、二维码、缩略图和后台静态资源不再依赖 Django `DEBUG=true`
+6. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
 
 ```bash
 ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build
@@ -267,24 +268,9 @@ backend/
 2. 安装依赖：`npm install`
 3. 复制环境变量：`cp .env.example .env`
 4. 启动开发服务：`npm run dev`
-
-如果需要临时通过公网 IP 或域名访问前端开发服务，可直接使用以下任一方式：
-
-```bash
-ASD_FRONTEND_PUBLIC_HOST=你的公网IP或域名 npm run dev
-```
-
-或在 `fullstack/` 目录下执行：
-
-```bash
-./scripts/start.sh 1 你的公网IP或域名
-```
-
-说明：
-
-- 默认监听 `0.0.0.0:5173`
-- 默认允许任意公网 IP 或域名访问当前开发服务
-- 如果你通过反向代理访问，且热更新连接的协议或端口不同，可在 `frontend/.env` 中补充 `ASD_FRONTEND_HMR_PROTOCOL` 与 `ASD_FRONTEND_HMR_PORT`
+- 默认仅监听本机回环地址 `127.0.0.1:5173`
+- 不再提供前端开发服务的公网 IP / 域名直连方式
+- 如需一键启动本地前端，可在 `fullstack/` 目录执行：`./scripts/start.sh 1`
 
 默认访问地址：
 

@@ -5,9 +5,10 @@ import { defineConfig, loadEnv } from "vite"
 import Components from "unplugin-vue-components/vite"
 import { AntDesignVueResolver } from "unplugin-vue-components/resolvers"
 
-const DEFAULT_DEV_HOST = "0.0.0.0"
+const DEFAULT_DEV_HOST = "127.0.0.1"
 const DEFAULT_DEV_PORT = 5173
 const DEFAULT_PREVIEW_PORT = 4173
+const DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 
 function resolvePort(value: string | undefined, fallbackPort: number): number {
   const parsedPort = Number(value)
@@ -25,31 +26,17 @@ function resolveAllowedHosts(rawHosts: string | undefined): true | string[] {
     .map((host) => host.trim())
     .filter(Boolean)
 
-  if (!normalizedHosts || normalizedHosts.length === 0 || normalizedHosts.includes("*")) {
-    return true
+  if (!normalizedHosts || normalizedHosts.length === 0) {
+    return DEFAULT_ALLOWED_HOSTS
   }
 
-  return normalizedHosts
-}
+  const filteredHosts = normalizedHosts.filter((host) => host !== "*")
 
-function resolveHmrConfig(env: Record<string, string>) {
-  const publicHost = env.ASD_FRONTEND_PUBLIC_HOST?.trim()
-
-  if (!publicHost) {
-    return undefined
+  if (filteredHosts.length === 0) {
+    return DEFAULT_ALLOWED_HOSTS
   }
 
-  const hmrProtocol = env.ASD_FRONTEND_HMR_PROTOCOL?.trim()
-  const hmrPort = resolvePort(
-    env.ASD_FRONTEND_HMR_PORT || env.ASD_FRONTEND_DEV_PORT,
-    DEFAULT_DEV_PORT,
-  )
-
-  return {
-    host: publicHost,
-    port: hmrPort,
-    protocol: hmrProtocol || undefined,
-  }
+  return filteredHosts
 }
 
 export default defineConfig(({ mode }) => {
@@ -106,9 +93,8 @@ export default defineConfig(({ mode }) => {
       host: devHost,
       port: devPort,
       strictPort: true,
-      // 开发阶段默认允许公网 IP 或域名直连，避免更换机器后还要反复改白名单。
+      // 开发阶段默认仅允许本机访问，避免误暴露到局域网或公网。
       allowedHosts: resolveAllowedHosts(env.ASD_FRONTEND_ALLOWED_HOSTS),
-      hmr: resolveHmrConfig(env),
       proxy: {
         "/api": {
           target: "http://127.0.0.1:8000",

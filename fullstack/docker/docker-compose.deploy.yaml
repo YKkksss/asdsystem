@@ -79,6 +79,7 @@ services:
         condition: service_healthy
     volumes:
       - backend_media:/app/media
+      - backend_static:/app/staticfiles
       - backend_logs:/app/logs
       - ../runtime/deployment_runtime:/deployment_runtime
     command: ["sh", "scripts/init_system.sh"]
@@ -98,6 +99,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - backend_media:/app/media
+      - backend_static:/app/staticfiles
       - backend_logs:/app/logs
     command: ["sh", "scripts/start_backend.sh"]
     healthcheck:
@@ -152,10 +154,14 @@ services:
         condition: service_healthy
     ports:
       - "${ASD_HTTP_PORT:-8080}:80"
+    volumes:
+      - backend_media:/var/www/media:ro
+      - backend_static:/var/www/static:ro
     restart: unless-stopped
 
 volumes:
   mysql_data:
   redis_data:
   backend_media:
+  backend_static:
   backend_logs:
