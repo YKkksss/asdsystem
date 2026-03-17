@@ -1,3 +1,4 @@
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -95,6 +96,68 @@ class BootstrapSystemCommandTests(TestCase):
             self.assertIn("| 档案员 | archivist | Archivist12345 |", content)
             self.assertIn("| 借阅人 | borrower | Borrower12345 |", content)
             self.assertIn("| 审计员 | auditor | Auditor12345 |", content)
+
+    def test_bootstrap_system_should_preserve_existing_passwords_when_requested(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            account_file = Path(temp_dir) / "accounts.md"
+
+            call_command(
+                "bootstrap_system",
+                username="admin",
+                password="Admin12345",
+                real_name="系统管理员",
+                account_file=str(account_file),
+            )
+
+            admin_user = User.objects.get(username="admin")
+            admin_user.set_password("CustomAdmin98765")
+            admin_user.save(update_fields=["password"])
+
+            call_command(
+                "bootstrap_system",
+                username="admin",
+                password="Admin12345",
+                real_name="系统管理员",
+                account_file=str(account_file),
+                preserve_existing_passwords=True,
+            )
+
+            admin_user.refresh_from_db()
+            self.assertTrue(admin_user.check_password("CustomAdmin98765"))
+            self.assertFalse(admin_user.check_password("Admin12345"))
+            self.assertIn("| 管理员 | admin | 沿用已有密码 |", account_file.read_text(encoding="utf-8"))
+
+    def test_check_bootstrap_state_should_report_required_before_bootstrap_and_ready_after_bootstrap(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            account_file = Path(temp_dir) / "accounts.md"
+
+            output = StringIO()
+            call_command(
+                "check_bootstrap_state",
+                username="admin",
+                dept_code="ROOT",
+                account_file=str(account_file),
+                stdout=output,
+            )
+            self.assertIn("BOOTSTRAP_REQUIRED=true", output.getvalue())
+
+            call_command(
+                "bootstrap_system",
+                username="admin",
+                password="Admin12345",
+                real_name="系统管理员",
+                account_file=str(account_file),
+            )
+
+            output = StringIO()
+            call_command(
+                "check_bootstrap_state",
+                username="admin",
+                dept_code="ROOT",
+                account_file=str(account_file),
+                stdout=output,
+            )
+            self.assertIn("BOOTSTRAP_REQUIRED=false", output.getvalue())
 
 
 class BootstrapDemoDataCommandTests(TestCase):

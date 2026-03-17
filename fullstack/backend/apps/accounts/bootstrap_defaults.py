@@ -485,6 +485,7 @@ def render_account_markdown(*, dept_name: str, accounts: list[BootstrapUserDefin
             "## 使用说明",
             "",
             "- 初始化命令可重复执行，重复执行会同步更新上述账号密码与角色绑定。",
+            "- 如果密码列显示“沿用已有密码”，表示本次执行仅同步基础数据，没有重置该账号的现有密码。",
             "- 如果需要修改默认账号，请调整 `fullstack/backend/apps/accounts/bootstrap_defaults.py` 后重新执行初始化命令。",
         ]
     )

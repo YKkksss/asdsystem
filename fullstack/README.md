@@ -53,20 +53,19 @@ fullstack/
 ```
 本脚本基于docker compose启动
 执行内容包括：
-1. 自动构建前端与后端镜像
+1. 自动判断前后端源码或镜像是否变化，仅在首次部署、镜像缺失或源码发生变化时重新构建对应镜像
 2. 自动启动 MySQL、Redis、后端、Celery Worker、Celery Beat、前端 Nginx
 3. 自动执行数据库迁移
-4. 自动初始化基础角色、部门和示例账号
-5. 交互询问是否初始化演示用业务示例数据
+4. 自动检查基础角色、部门、权限和默认账号是否缺失，仅在首次部署或基础数据不完整时执行基础初始化
+5. 重复部署默认保留已有账号密码，不再自动重置为默认口令
 6. 自动在 `runtime/deployment_runtime/accounts.md` 输出账号清单
 
-示例数据初始化说明：
+说明：
 
-1. 执行 `./scripts/deploy.sh` 时，脚本会提示 `是否初始化示例数据？(Y/N)`。
-2. 输入 `Y` 或 `y` 时，会额外初始化档案、借阅、销毁、数字化任务、通知与演示附件等业务示例数据。
-3. 输入 `N` 或 `n` 时，仅初始化基础账号、角色、权限和部门，不写入演示业务数据。
-4. 非交互环境可通过 `ASD_INIT_DEMO_DATA=true` 或 `ASD_INIT_DEMO_DATA=false` 显式指定是否初始化示例数据。
-5. 示例数据适用于演示和验收环境，不建议直接保留在正式生产库中。
+1. 当前部署脚本会固定关闭示例业务数据初始化，仅保留基础账号、角色、权限和部门。
+2. 如果数据库卷被清空、基础账号被删除、权限项缺失，部署脚本会在启动时自动补齐基础数据。
+3. 如果只是二次更新且镜像、源码和基础数据都没有变化，则脚本会直接复用现有镜像和已有基础数据。
+4. 如需强制重新构建本地镜像，可在执行前临时附加 `ASD_FORCE_BUILD=true`。
 
 默认访问地址：
 
@@ -96,8 +95,9 @@ docker compose -f docker/docker-compose.deploy.yaml up -d --build
 3. 账号清单同样会输出到 `runtime/deployment_runtime/accounts.md`
 4. 默认关闭 `DEBUG` 与全量 CORS，并通过前端 Nginx 固定上游 Host，保证本机和常见内网访问可直接使用
 5. Docker 前端容器会直接提供 `/media/` 与 `/static/`，条码、二维码、缩略图和后台静态资源不再依赖 Django `DEBUG=true`
-6. 如果需要同时初始化演示业务数据，可在执行前设置 `ASD_INIT_DEMO_DATA=true`
-7. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
+6. `backend-init` 会在容器内自动判断基础系统数据是否缺失；如果数据库已完整初始化，则只执行迁移和静态资源同步，不重复重置默认账号密码
+7. 如果需要同时初始化演示业务数据，可在执行前显式设置 `ASD_INIT_DEMO_DATA=true`
+8. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
 
 ```bash
 ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 ASD_INIT_DEMO_DATA=true DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build

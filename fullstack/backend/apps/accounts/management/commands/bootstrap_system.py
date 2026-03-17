@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 from django.conf import settings
@@ -37,6 +38,11 @@ class Command(BaseCommand):
             "--account-file",
             default=str(settings.BASE_DIR.parent / "runtime" / "deployment_runtime" / "accounts.md"),
             help="账号清单输出文件路径，默认生成到 fullstack/runtime/deployment_runtime/ 目录。",
+        )
+        parser.add_argument(
+            "--preserve-existing-passwords",
+            action="store_true",
+            help="如果用户已存在，则保留现有密码不重置，仅同步角色、部门和其他基础属性。",
         )
 
     def _upsert_department(self, definition: BootstrapDepartmentDefinition, department_map: dict[str, Department]) -> Department:
@@ -121,9 +127,10 @@ class Command(BaseCommand):
         definition: BootstrapUserDefinition,
         role_map: dict[str, Role],
         department_map: dict[str, Department],
-    ) -> User:
+        preserve_existing_passwords: bool,
+    ) -> tuple[User, BootstrapUserDefinition]:
         department = department_map[definition.dept_code]
-        user, _ = User.objects.get_or_create(
+        user, created = User.objects.get_or_create(
             username=definition.username,
             defaults={
                 "real_name": definition.real_name,
@@ -139,10 +146,14 @@ class Command(BaseCommand):
         user.is_staff = definition.is_staff
         user.status = True
         user.security_clearance_level = definition.security_clearance_level
-        user.set_password(definition.password)
+        account_definition = definition
+        if created or not preserve_existing_passwords:
+            user.set_password(definition.password)
+        else:
+            account_definition = replace(definition, password="沿用已有密码")
         user.save()
         assign_roles_to_user(user, [role_map[definition.role_code].id])
-        return user
+        return user, account_definition
 
     def _write_account_file(self, *, dept_name: str, account_file: Path, users: list[BootstrapUserDefinition]) -> None:
         account_file.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +169,7 @@ class Command(BaseCommand):
         dept_code = options["dept_code"].strip()
         dept_name = options["dept_name"].strip()
         account_file = Path(options["account_file"]).expanduser().resolve()
+        preserve_existing_passwords = bool(options["preserve_existing_passwords"])
 
         if len(password) < 6:
             raise CommandError("管理员密码长度不能少于 6 位。")
@@ -181,12 +193,16 @@ class Command(BaseCommand):
         )
 
         user_map: dict[str, User] = {}
+        account_user_definitions: list[BootstrapUserDefinition] = []
         for definition in user_definitions:
-            user_map[definition.role_code] = self._upsert_user(
+            user, account_definition = self._upsert_user(
                 definition=definition,
                 role_map=role_map,
                 department_map=department_map,
+                preserve_existing_passwords=preserve_existing_passwords,
             )
+            user_map[definition.role_code] = user
+            account_user_definitions.append(account_definition)
 
         admin_user = user_map["ADMIN"]
         for department in department_map.values():
@@ -197,7 +213,7 @@ class Command(BaseCommand):
         self._write_account_file(
             dept_name=dept_name,
             account_file=account_file,
-            users=user_definitions,
+            users=account_user_definitions,
         )
 
         self.stdout.write(self.style.SUCCESS(f"初始化账号完成，共写入 {len(user_definitions)} 个角色账号。"))
