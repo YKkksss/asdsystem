@@ -372,3 +372,44 @@ class DestructionApiTests(APITestCase):
         self.assertEqual(approve_response.status_code, 200)
         application.refresh_from_db()
         self.assertEqual(application.status, DestroyApplicationStatus.APPROVED)
+
+    def test_execute_destroy_application_should_reject_duplicate_execution(self) -> None:
+        archive = self.create_archive(archive_code="A2026-D100")
+        application_id = self.create_destroy_application(archive)
+
+        self.client.force_authenticate(self.admin_user)
+        approve_response = self.client.post(
+            f"/api/v1/destruction/applications/{application_id}/approve/",
+            {
+                "action": "APPROVE",
+                "opinion": "允许执行",
+            },
+            format="json",
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        self.client.force_authenticate(self.archivist_user)
+        first_execute_response = self.client.post(
+            f"/api/v1/destruction/applications/{application_id}/execute/",
+            {
+                "execution_note": "首次执行销毁",
+                "attachment_files": [
+                    SimpleUploadedFile("destroy-proof.pdf", b"proof-content", content_type="application/pdf")
+                ],
+            },
+            format="multipart",
+        )
+        second_execute_response = self.client.post(
+            f"/api/v1/destruction/applications/{application_id}/execute/",
+            {
+                "execution_note": "重复执行销毁",
+                "attachment_files": [
+                    SimpleUploadedFile("destroy-proof-2.pdf", b"proof-content-2", content_type="application/pdf")
+                ],
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(first_execute_response.status_code, 200)
+        self.assertEqual(second_execute_response.status_code, 400)
+        self.assertEqual(second_execute_response.json()["message"], "当前销毁申请已完成执行，不能重复处理。")

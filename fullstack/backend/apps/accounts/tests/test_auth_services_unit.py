@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -8,7 +9,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import SecurityClearance
-from apps.accounts.services import get_locked_until, refresh_access_token, register_login_failure
+from apps.accounts.services import complete_login_success, get_locked_until, refresh_access_token, register_login_failure
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
 
@@ -71,3 +72,25 @@ class AuthServicesUnitTests(TestCase):
 
         with self.assertRaisesMessage(PermissionDenied, "当前账号已停用，请重新登录。"):
             refresh_access_token(refresh_token)
+
+    @patch("apps.accounts.services.logger.warning")
+    def test_register_login_failure_log_should_not_contain_raw_password(self, mocked_logger_warning) -> None:
+        register_login_failure(self.user)
+
+        mocked_logger_warning.assert_called_once()
+        logged_output = f"{mocked_logger_warning.call_args.args}{mocked_logger_warning.call_args.kwargs}"
+        self.assertNotIn("UnitAuth12345", logged_output)
+        self.assertNotIn("password", mocked_logger_warning.call_args.kwargs.get("extra", {}))
+
+    @patch("apps.accounts.services.logger.info")
+    def test_token_logs_should_not_contain_raw_token_values(self, mocked_logger_info) -> None:
+        login_tokens = complete_login_success(self.user, request_ip="127.0.0.1")
+        mocked_logger_info.reset_mock()
+
+        refresh_access_token(login_tokens["refresh"])
+
+        mocked_logger_info.assert_called_once()
+        logged_output = f"{mocked_logger_info.call_args.args}{mocked_logger_info.call_args.kwargs}"
+        self.assertNotIn(login_tokens["refresh"], logged_output)
+        self.assertNotIn(login_tokens["access"], logged_output)
+        self.assertFalse({"token", "refresh", "access"} & set(mocked_logger_info.call_args.kwargs.get("extra", {}).keys()))

@@ -398,14 +398,14 @@ def execute_destroy_application(
     execution_note: str,
     attachment_files: list,
 ) -> DestroyApplication:
+    if hasattr(application, "execution_record"):
+        raise ValidationError("当前销毁申请已完成执行，不能重复处理。")
+
     if application.status != DestroyApplicationStatus.APPROVED:
         raise ValidationError("仅审批通过的销毁申请允许执行销毁。")
 
     if not can_user_execute_destroy_application(operator, application):
         raise ValidationError("当前用户缺少销毁执行权限。")
-
-    if hasattr(application, "execution_record"):
-        raise ValidationError("当前销毁申请已完成执行，不能重复处理。")
 
     archive = application.archive
     if archive.status != ArchiveStatus.DESTROY_PENDING:

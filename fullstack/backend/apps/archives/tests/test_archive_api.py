@@ -429,6 +429,35 @@ class ArchiveApiTests(APITestCase):
         self.assertEqual(response.json()["message"], "请先生成档案条码或二维码后再执行打印。")
         self.assertFalse(AuditLog.objects.filter(action_code="ARCHIVE_CODE_PRINT", biz_id=archive_id).exists())
 
+    def test_low_permission_user_should_not_generate_or_print_archive_codes(self) -> None:
+        archive_response = self.client.post(
+            "/api/v1/archives/records/",
+            {
+                "archive_code": "A2026-0011A",
+                "title": "权限拦截条码档案",
+                "year": 2026,
+                "retention_period": "长期",
+                "security_level": SecurityClearance.INTERNAL,
+            },
+            format="json",
+        )
+        archive_id = archive_response.json()["data"]["id"]
+
+        self.client.force_authenticate(self.low_clearance_user)
+        generate_response = self.client.post(f"/api/v1/archives/records/{archive_id}/generate-codes/", format="json")
+
+        self.assertEqual(generate_response.status_code, 403)
+
+        self.client.force_authenticate(self.user)
+        prepare_response = self.client.post(f"/api/v1/archives/records/{archive_id}/generate-codes/", format="json")
+        self.assertEqual(prepare_response.status_code, 200)
+
+        self.client.force_authenticate(self.low_clearance_user)
+        print_response = self.client.post(f"/api/v1/archives/records/{archive_id}/print-codes/", format="json")
+
+        self.assertEqual(print_response.status_code, 403)
+        self.assertFalse(AuditLog.objects.filter(action_code="ARCHIVE_CODE_PRINT", biz_id=archive_id).exists())
+
     def test_batch_print_codes_should_update_all_archives_and_keep_request_order(self) -> None:
         first_archive_response = self.client.post(
             "/api/v1/archives/records/",

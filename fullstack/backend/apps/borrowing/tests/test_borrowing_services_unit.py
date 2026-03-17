@@ -197,3 +197,41 @@ class BorrowingServicesUnitTests(TestCase):
 
         self.assertEqual(reminder_record.email_task.send_status, "SUCCESS")
         self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.SUCCESS)
+
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=False,
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    )
+    def test_process_email_task_should_sync_running_and_failed_status_to_borrow_reminder(self) -> None:
+        archive = self.create_archive(archive_code="A2026-BU007", status=ArchiveStatus.BORROWED)
+        application = self.create_application(
+            archive=archive,
+            status=BorrowApplicationStatus.OVERDUE,
+            expected_return_at=timezone.now() - timedelta(days=3),
+        )
+
+        with patch("apps.notifications.tasks.send_email_task.delay"):
+            reminder_record = create_email_reminder_record(
+                application=application,
+                receiver_user=self.applicant,
+                reminder_type=BorrowReminderType.OVERDUE,
+                content="超期催还失败测试",
+            )
+
+        def failing_send_mail(*args, **kwargs):
+            reminder_record.refresh_from_db()
+            reminder_record.email_task.refresh_from_db()
+            self.assertEqual(reminder_record.email_task.send_status, "RUNNING")
+            self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.RUNNING)
+            raise RuntimeError("模拟 SMTP 失败")
+
+        with patch("apps.notifications.services.send_mail", side_effect=failing_send_mail):
+            process_email_task(reminder_record.email_task_id)
+
+        reminder_record.refresh_from_db()
+        reminder_record.email_task.refresh_from_db()
+
+        self.assertEqual(reminder_record.email_task.send_status, "FAILED")
+        self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.FAILED)
+        self.assertEqual(reminder_record.email_task.retry_count, 1)
+        self.assertEqual(reminder_record.email_task.error_message, "模拟 SMTP 失败")

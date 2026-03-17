@@ -796,6 +796,9 @@ def register_borrow_checkout(
     operator,
     checkout_note: str | None = None,
 ) -> BorrowApplication:
+    if hasattr(application, "checkout_record"):
+        raise ValidationError("当前借阅申请已办理过出库。")
+
     if application.status != BorrowApplicationStatus.APPROVED:
         raise ValidationError("仅审批通过的借阅申请允许办理出库。")
 
@@ -805,9 +808,6 @@ def register_borrow_checkout(
     archive = application.archive
     if archive.status != ArchiveStatus.ON_SHELF:
         raise ValidationError("当前档案不在可出库状态。")
-
-    if hasattr(application, "checkout_record"):
-        raise ValidationError("当前借阅申请已办理过出库。")
 
     location_snapshot = archive.location.full_location_code if archive.location else None
     checkout_record = BorrowCheckoutRecord.objects.create(

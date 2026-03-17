@@ -438,6 +438,87 @@ class BorrowingApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["message"], "当前账号密级不足，不能申请该档案借阅。")
 
+    def test_duplicate_borrow_application_should_be_rejected(self) -> None:
+        archive = self.create_archive(
+            archive_code="A2026-B002A",
+            security_level=SecurityClearance.INTERNAL,
+        )
+        expected_return_at = (timezone.now() + timedelta(days=3)).isoformat()
+
+        self.client.force_authenticate(self.borrower_user)
+        first_response = self.client.post(
+            "/api/v1/borrowing/applications/",
+            {
+                "archive_id": archive.id,
+                "purpose": "重复借阅申请测试-首次",
+                "expected_return_at": expected_return_at,
+            },
+            format="json",
+        )
+        second_response = self.client.post(
+            "/api/v1/borrowing/applications/",
+            {
+                "archive_id": archive.id,
+                "purpose": "重复借阅申请测试-再次提交",
+                "expected_return_at": expected_return_at,
+            },
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 400)
+        self.assertEqual(second_response.json()["message"], "当前档案已存在进行中的借阅申请，暂不可重复申请。")
+
+    def test_duplicate_checkout_should_return_conflict_message(self) -> None:
+        archive = self.create_archive(
+            archive_code="A2026-B002B",
+            security_level=SecurityClearance.INTERNAL,
+        )
+        expected_return_at = (timezone.now() + timedelta(days=3)).isoformat()
+
+        self.client.force_authenticate(self.borrower_user)
+        create_response = self.client.post(
+            "/api/v1/borrowing/applications/",
+            {
+                "archive_id": archive.id,
+                "purpose": "重复出库测试",
+                "expected_return_at": expected_return_at,
+            },
+            format="json",
+        )
+        application_id = create_response.json()["data"]["id"]
+
+        self.client.force_authenticate(self.approver_user)
+        approve_response = self.client.post(
+            f"/api/v1/borrowing/applications/{application_id}/approve/",
+            {
+                "action": "APPROVE",
+                "opinion": "同意借阅。",
+            },
+            format="json",
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        self.client.force_authenticate(self.archivist_user)
+        first_checkout_response = self.client.post(
+            f"/api/v1/borrowing/applications/{application_id}/checkout/",
+            {
+                "checkout_note": "首次办理出库。",
+            },
+            format="json",
+        )
+        second_checkout_response = self.client.post(
+            f"/api/v1/borrowing/applications/{application_id}/checkout/",
+            {
+                "checkout_note": "重复办理出库。",
+            },
+            format="json",
+        )
+
+        self.assertEqual(first_checkout_response.status_code, 200)
+        self.assertEqual(second_checkout_response.status_code, 400)
+        self.assertEqual(second_checkout_response.json()["message"], "当前借阅申请已办理过出库。")
+
     def test_submit_return_without_attachments_should_fail(self) -> None:
         archive = self.create_archive(
             archive_code="A2026-B003",

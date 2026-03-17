@@ -13,6 +13,7 @@ from rest_framework.test import APIClient, APITestCase
 from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
 from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveFile, ArchiveFileStatus, ArchiveStatus
+from apps.digitization.services import process_file_process_job
 from apps.digitization.models import FileProcessJob, FileProcessJobStatus, ScanTaskItemStatus, ScanTaskStatus
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
@@ -211,6 +212,53 @@ class ScanTaskApiTests(APITestCase):
 
         callbacks[0]()
         self.assertEqual(mocked_delay.call_count, 2)
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("apps.digitization.services.process_file_process_job_task.delay")
+    def test_non_eager_upload_should_allow_jobs_process_from_pending_to_success(self, mocked_delay) -> None:
+        archive = self._create_archive("SCAN-2026-006A")
+        create_response = self.client.post(
+            "/api/v1/digitization/scan-tasks/",
+            {
+                "task_name": "异步处理收口测试",
+                "archive_ids": [archive.id],
+            },
+            format="json",
+        )
+        task_id = create_response.json()["data"]["id"]
+        task_item_id = create_response.json()["data"]["items"][0]["id"]
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            upload_response = self.client.post(
+                f"/api/v1/digitization/scan-task-items/{task_item_id}/upload-files/",
+                {"files": [self._create_pdf_file()]},
+                format="multipart",
+            )
+
+        self.assertEqual(upload_response.status_code, 200)
+
+        archive_file = ArchiveFile.objects.get(scan_task_item_id=task_item_id)
+        jobs = list(FileProcessJob.objects.filter(archive_file=archive_file).order_by("id"))
+        self.assertEqual(len(jobs), 2)
+        self.assertFalse(FileProcessJob.objects.exclude(status=FileProcessJobStatus.PENDING).filter(id__in=[job.id for job in jobs]).exists())
+
+        callbacks[0]()
+        self.assertEqual(mocked_delay.call_count, 2)
+
+        for job in jobs:
+            process_file_process_job(job.id)
+
+        archive_file.refresh_from_db()
+        refreshed_jobs = FileProcessJob.objects.filter(id__in=[job.id for job in jobs])
+        self.assertFalse(refreshed_jobs.exclude(status=FileProcessJobStatus.SUCCESS).exists())
+        self.assertEqual(archive_file.status, ArchiveFileStatus.ACTIVE)
+        self.assertTrue(archive_file.thumbnail_path)
+        self.assertIn("Scan Task PDF Text Extraction", archive_file.extracted_text or "")
+
+        task_detail_response = self.client.get(f"/api/v1/digitization/scan-tasks/{task_id}/")
+        self.assertEqual(task_detail_response.status_code, 200)
+        self.assertEqual(task_detail_response.json()["data"]["status"], ScanTaskStatus.COMPLETED)
+        self.assertEqual(task_detail_response.json()["data"]["completed_count"], 1)
 
     def test_upload_invalid_extension_should_fail(self) -> None:
         archive = self._create_archive("SCAN-2026-004")

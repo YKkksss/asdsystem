@@ -20,10 +20,8 @@ usage() {
 
 说明：
   1. 默认执行 up，会自动构建镜像、启动容器、执行迁移并初始化基础账号。
-  2. 交互执行 up 时，会询问是否初始化示例业务数据。
-  3. 首次部署后，账号清单会输出到 runtime/deployment_runtime/accounts.md。
-  4. 可通过环境变量 ASD_INIT_DEMO_DATA=true|false 跳过交互并指定是否初始化示例数据。
-  5. 如需自定义端口或管理员账号，可在执行前设置环境变量，例如：
+  2. 首次部署后，账号清单会输出到 runtime/deployment_runtime/accounts.md。
+  3. 如需自定义端口或管理员账号，可在执行前设置环境变量，例如：
      ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 ./scripts/deploy.sh
 EOF
 }
@@ -46,59 +44,6 @@ require_docker_compose() {
 
 ensure_runtime_dirs() {
   mkdir -p "${RUNTIME_DIR}"
-}
-
-normalize_demo_flag() {
-  local raw_value="${1:-}"
-  case "${raw_value}" in
-    y|Y|yes|YES|Yes|true|TRUE|True|1)
-      printf 'true'
-      ;;
-    n|N|no|NO|No|false|FALSE|False|0)
-      printf 'false'
-      ;;
-    *)
-      printf 'invalid'
-      ;;
-  esac
-}
-
-resolve_demo_flag() {
-  # 优先复用外部显式传入的环境变量，兼容非交互部署场景。
-  if [[ -n "${ASD_INIT_DEMO_DATA:-}" ]]; then
-    local normalized_flag
-    normalized_flag="$(normalize_demo_flag "${ASD_INIT_DEMO_DATA}")"
-    if [[ "${normalized_flag}" == "invalid" ]]; then
-      echo "环境变量 ASD_INIT_DEMO_DATA 仅支持 true/false、yes/no、y/n、1/0。"
-      exit 1
-    fi
-    ASD_INIT_DEMO_DATA="${normalized_flag}"
-    return
-  fi
-
-  if [[ ! -t 0 ]]; then
-    ASD_INIT_DEMO_DATA="false"
-    echo "未检测到交互终端，默认不初始化示例数据。"
-    return
-  fi
-
-  while true; do
-    local user_input
-    read -r -p "是否初始化示例数据？(Y/N): " user_input
-    case "${user_input}" in
-      y|Y)
-        ASD_INIT_DEMO_DATA="true"
-        return
-        ;;
-      n|N)
-        ASD_INIT_DEMO_DATA="false"
-        return
-        ;;
-      *)
-        echo "无效输入，请输入 Y 或 N。"
-        ;;
-    esac
-  done
 }
 
 wait_for_deployment() {
@@ -138,11 +83,11 @@ up() {
   ensure_runtime_dirs
   require_docker_compose
   require_command curl
-  resolve_demo_flag
 
   echo "正在执行一键部署..."
   (
-    export ASD_INIT_DEMO_DATA
+    # 当前阶段先固定关闭示例业务数据初始化，避免更新部署时覆盖已有演示数据。
+    export ASD_INIT_DEMO_DATA="false"
     cd "${FULLSTACK_DIR}" &&
     docker compose -f "${COMPOSE_FILE}" up -d --build
   )
@@ -159,11 +104,6 @@ up() {
   echo "前端地址：http://127.0.0.1:${HTTP_PORT}"
   echo "其他设备访问：http://服务器IP或域名:${HTTP_PORT}"
   echo "后端健康检查：http://127.0.0.1:${HTTP_PORT}/api/v1/system/health/"
-  if [[ "${ASD_INIT_DEMO_DATA}" == "true" ]]; then
-    echo "本次部署已初始化示例业务数据。"
-  else
-    echo "本次部署未初始化示例业务数据。"
-  fi
   show_accounts
 }
 
