@@ -52,6 +52,8 @@ class BorrowReminderChannel(models.TextChoices):
 
 
 class BorrowReminderSendStatus(models.TextChoices):
+    PENDING = "PENDING", "待发送"
+    RUNNING = "RUNNING", "发送中"
     SUCCESS = "SUCCESS", "成功"
     FAILED = "FAILED", "失败"
 
@@ -303,7 +305,7 @@ class BorrowReminderRecord(TimeStampedModel):
     send_status = models.CharField(
         max_length=16,
         choices=BorrowReminderSendStatus.choices,
-        default=BorrowReminderSendStatus.SUCCESS,
+        default=BorrowReminderSendStatus.PENDING,
         db_index=True,
         verbose_name="发送状态",
     )

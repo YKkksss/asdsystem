@@ -3,9 +3,15 @@ from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.accounts.models import Role, SystemPermission, UserRole
+from apps.archives.models import ArchiveFile, ArchiveRecord, ArchiveStorageLocation
+from apps.audit.models import AuditLog
+from apps.borrowing.models import BorrowApplication, BorrowApplicationStatus
+from apps.destruction.models import DestroyApplication, DestroyApplicationStatus
+from apps.digitization.models import ScanTask
+from apps.notifications.models import EmailTask, SystemNotification
 from apps.organizations.models import Department
 
 
@@ -89,3 +95,55 @@ class BootstrapSystemCommandTests(TestCase):
             self.assertIn("| 档案员 | archivist | Archivist12345 |", content)
             self.assertIn("| 借阅人 | borrower | Borrower12345 |", content)
             self.assertIn("| 审计员 | auditor | Auditor12345 |", content)
+
+
+class BootstrapDemoDataCommandTests(TestCase):
+    def setUp(self) -> None:
+        self.temp_media_dir = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.temp_media_dir.name)
+        self.media_override.enable()
+
+    def tearDown(self) -> None:
+        self.media_override.disable()
+        self.temp_media_dir.cleanup()
+        super().tearDown()
+
+    def test_bootstrap_demo_data_should_create_idempotent_business_demo_data(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            account_file = Path(temp_dir) / "accounts.md"
+
+            call_command(
+                "bootstrap_system",
+                username="admin",
+                password="Admin12345",
+                real_name="系统管理员",
+                account_file=str(account_file),
+            )
+
+            call_command("bootstrap_demo_data", admin_username="admin")
+            call_command("bootstrap_demo_data", admin_username="admin")
+
+            self.assertEqual(ArchiveStorageLocation.objects.count(), 2)
+            self.assertEqual(ArchiveRecord.objects.count(), 6)
+            self.assertEqual(ScanTask.objects.count(), 2)
+            self.assertEqual(BorrowApplication.objects.count(), 3)
+            self.assertEqual(DestroyApplication.objects.count(), 2)
+            self.assertEqual(SystemNotification.objects.count(), 5)
+            self.assertEqual(EmailTask.objects.count(), 1)
+            self.assertEqual(AuditLog.objects.filter(module_name="DEMO").count(), 4)
+
+            contract_archive = ArchiveRecord.objects.get(archive_code="DEMO-ARC-002")
+            self.assertEqual(contract_archive.barcodes.count(), 2)
+
+            contract_file = ArchiveFile.objects.get(archive=contract_archive, file_name="DEMO-ARC-002.pdf")
+            self.assertTrue(Path(self.temp_media_dir.name, contract_file.file_path).exists())
+            self.assertTrue(Path(self.temp_media_dir.name, contract_file.thumbnail_path).exists())
+
+            overdue_application = BorrowApplication.objects.get(application_no="DEMO-BORROW-002")
+            self.assertEqual(overdue_application.status, BorrowApplicationStatus.OVERDUE)
+            self.assertTrue(overdue_application.reminder_records.filter(channel="SITE").exists())
+            self.assertTrue(overdue_application.reminder_records.filter(channel="EMAIL").exists())
+
+            executed_destroy = DestroyApplication.objects.get(application_no="DEMO-DESTROY-002")
+            self.assertEqual(executed_destroy.status, DestroyApplicationStatus.EXECUTED)
+            self.assertTrue(executed_destroy.execution_record.attachments.exists())

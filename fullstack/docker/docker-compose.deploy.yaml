@@ -72,6 +72,7 @@ services:
       ASD_ADMIN_REAL_NAME: ${ASD_ADMIN_REAL_NAME:-系统管理员}
       ASD_ROOT_DEPT_CODE: ${ASD_ROOT_DEPT_CODE:-ROOT}
       ASD_ROOT_DEPT_NAME: ${ASD_ROOT_DEPT_NAME:-总部}
+      ASD_INIT_DEMO_DATA: ${ASD_INIT_DEMO_DATA:-false}
     depends_on:
       mysql:
         condition: service_healthy

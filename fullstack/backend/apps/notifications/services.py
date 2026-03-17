@@ -181,6 +181,8 @@ def create_email_task(
 
 
 def process_email_task(email_task_id: int) -> None:
+    from apps.borrowing.services import sync_borrow_reminder_records_for_email_task
+
     email_task = EmailTask.objects.filter(id=email_task_id).first()
     if not email_task:
         return
@@ -188,6 +190,7 @@ def process_email_task(email_task_id: int) -> None:
     email_task.send_status = EmailTaskStatus.RUNNING
     email_task.error_message = None
     email_task.save(update_fields=["send_status", "error_message", "updated_at"])
+    sync_borrow_reminder_records_for_email_task(email_task=email_task)
 
     try:
         send_result = send_mail(
@@ -203,6 +206,7 @@ def process_email_task(email_task_id: int) -> None:
         email_task.send_status = EmailTaskStatus.SUCCESS
         email_task.sent_at = timezone.now()
         email_task.save(update_fields=["send_status", "sent_at", "updated_at"])
+        sync_borrow_reminder_records_for_email_task(email_task=email_task)
         logger.info(
             "邮件发送成功",
             extra={
@@ -215,6 +219,7 @@ def process_email_task(email_task_id: int) -> None:
         email_task.retry_count += 1
         email_task.error_message = str(exc)
         email_task.save(update_fields=["send_status", "retry_count", "error_message", "updated_at"])
+        sync_borrow_reminder_records_for_email_task(email_task=email_task)
         logger.exception(
             "邮件发送失败",
             extra={

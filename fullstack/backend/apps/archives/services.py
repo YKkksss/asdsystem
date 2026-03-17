@@ -160,6 +160,61 @@ def filter_archive_queryset_by_user_scope(queryset, user):
     return queryset.filter(self_scope_filter)
 
 
+def user_can_keep_archive_within_scope(
+    *,
+    user,
+    responsible_dept,
+    responsible_person: str | None,
+    created_by: int | None,
+) -> bool:
+    if _user_is_admin(user):
+        return True
+
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+
+    user_dept_id = getattr(user, "dept_id", None)
+    scope = resolve_user_archive_data_scope(user)
+    user_real_name = (getattr(user, "real_name", "") or "").strip()
+
+    if scope == DataScope.ALL:
+        return True
+
+    if responsible_dept is None:
+        if created_by == user.id:
+            return True
+        return bool(scope == DataScope.SELF and user_real_name and (responsible_person or "").strip() == user_real_name)
+
+    if scope == DataScope.DEPT:
+        return responsible_dept.id == user_dept_id
+
+    if scope == DataScope.DEPT_AND_CHILD:
+        if responsible_dept.id == user_dept_id:
+            return True
+        user_dept = getattr(user, "dept", None)
+        user_dept_path = getattr(user_dept, "dept_path", "")
+        target_dept_path = getattr(responsible_dept, "dept_path", "")
+        return bool(
+            user_dept_path
+            and target_dept_path
+            and (
+                target_dept_path == user_dept_path
+                or target_dept_path.startswith(f"{user_dept_path}/")
+            )
+        )
+
+    if responsible_dept.id == user_dept_id:
+        return True
+
+    if created_by == user.id:
+        return True
+
+    if user_real_name and (responsible_person or "").strip() == user_real_name:
+        return True
+
+    return False
+
+
 def validate_archive_data_scope(*, archive: ArchiveRecord, user) -> None:
     accessible = filter_archive_queryset_by_user_scope(
         ArchiveRecord.objects.filter(id=archive.id),
@@ -262,6 +317,13 @@ def create_archive_record(
     revision_remark: str | None = None,
 ) -> ArchiveRecord:
     operator = _resolve_operator(operator_id)
+    if not user_can_keep_archive_within_scope(
+        user=operator,
+        responsible_dept=validated_data.get("responsible_dept"),
+        responsible_person=validated_data.get("responsible_person"),
+        created_by=operator_id,
+    ):
+        raise ValidationError("当前账号无权创建所属范围外的档案。")
     archive = ArchiveRecord.objects.create(
         **validated_data,
         created_by=operator_id,
@@ -298,6 +360,15 @@ def update_archive_record(
     revision_remark: str | None = None,
 ) -> ArchiveRecord:
     operator = _resolve_operator(operator_id)
+    next_responsible_dept = validated_data.get("responsible_dept", archive.responsible_dept)
+    next_responsible_person = validated_data.get("responsible_person", archive.responsible_person)
+    if not user_can_keep_archive_within_scope(
+        user=operator,
+        responsible_dept=next_responsible_dept,
+        responsible_person=next_responsible_person,
+        created_by=archive.created_by,
+    ):
+        raise ValidationError("当前账号无权将档案调整到所属范围外。")
     before_snapshot = build_archive_snapshot(archive)
     for field_name, value in validated_data.items():
         setattr(archive, field_name, value)

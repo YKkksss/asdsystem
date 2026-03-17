@@ -45,7 +45,6 @@
           <div class="section-head">
             <div>
               <strong>核心指标</strong>
-              <p>先看当前账号职责范围内的档案、借阅和通知总览。</p>
             </div>
           </div>
 
@@ -69,7 +68,6 @@
           <div class="section-head">
             <div>
               <strong>待办提醒</strong>
-              <p>优先处理当前最容易阻塞业务链路的任务。</p>
             </div>
           </div>
 
@@ -93,7 +91,6 @@
           <div class="section-head">
             <div>
               <strong>业务动态</strong>
-              <p>把当前账号最需要处理的业务单据和最近消息收敛在一起，减少反复切页查找。</p>
             </div>
           </div>
 
@@ -101,7 +98,6 @@
             <article class="list-board">
               <div class="list-board-head">
                 <strong>近期待办明细</strong>
-                <p>直接进入当前最需要处理的业务入口，优先清理阻塞项。</p>
               </div>
 
               <div v-if="dashboard.pending_task_items.length" class="list-stack">
@@ -130,7 +126,6 @@
             <article class="list-board">
               <div class="list-board-head">
                 <strong>最近通知</strong>
-                <p>优先查看最新的审批、催还和系统消息，避免遗漏业务提醒。</p>
               </div>
 
               <div v-if="dashboard.recent_notifications.length" class="list-stack">
@@ -162,7 +157,6 @@
           <div class="section-head">
             <div>
               <strong>近 7 天趋势</strong>
-              <p>按借阅申请、完成归还和超期在借三个维度查看最近一周的业务变化。</p>
             </div>
           </div>
 
@@ -174,7 +168,6 @@
             >
               <div class="trend-head">
                 <strong>{{ section.title }}</strong>
-                <p>{{ section.description }}</p>
               </div>
 
               <div class="trend-chart">
@@ -203,7 +196,6 @@
           <div class="section-head">
             <div>
               <strong>快捷入口</strong>
-              <p>按当前角色能进入的高频页面收敛为一组操作入口。</p>
             </div>
           </div>
 
@@ -225,7 +217,6 @@
           <div class="section-head">
             <div>
               <strong>流程看板</strong>
-              <p>按档案、借阅、销毁与监督流程分区查看积压点和当前闭环状态。</p>
             </div>
           </div>
 
@@ -237,7 +228,6 @@
             >
               <div class="workflow-head">
                 <strong>{{ section.title }}</strong>
-                <p>{{ section.description }}</p>
               </div>
 
               <div class="workflow-item-grid">

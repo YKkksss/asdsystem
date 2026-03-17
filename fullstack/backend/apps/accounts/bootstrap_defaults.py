@@ -2,6 +2,11 @@ from dataclasses import dataclass
 
 from apps.accounts.models import DataScope, PermissionType, SecurityClearance
 
+DEFAULT_ADMIN_PASSWORD = "Admin12345"
+DEFAULT_ARCHIVIST_PASSWORD = "Archivist12345"
+DEFAULT_BORROWER_PASSWORD = "Borrower12345"
+DEFAULT_AUDITOR_PASSWORD = "Auditor12345"
+
 
 @dataclass(frozen=True)
 class BootstrapRoleDefinition:
@@ -423,7 +428,7 @@ def build_default_users(
         ),
         BootstrapUserDefinition(
             username="archivist",
-            password="Archivist12345",
+            password=DEFAULT_ARCHIVIST_PASSWORD,
             real_name="档案员示例账号",
             role_code="ARCHIVIST",
             dept_code="ARC",
@@ -433,7 +438,7 @@ def build_default_users(
         ),
         BootstrapUserDefinition(
             username="borrower",
-            password="Borrower12345",
+            password=DEFAULT_BORROWER_PASSWORD,
             real_name="借阅人示例账号",
             role_code="BORROWER",
             dept_code="BUS",
@@ -443,7 +448,7 @@ def build_default_users(
         ),
         BootstrapUserDefinition(
             username="auditor",
-            password="Auditor12345",
+            password=DEFAULT_AUDITOR_PASSWORD,
             real_name="审计员示例账号",
             role_code="AUDITOR",
             dept_code="AUD",

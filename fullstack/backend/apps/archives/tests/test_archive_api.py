@@ -197,6 +197,69 @@ class ArchiveApiTests(APITestCase):
         self.assertEqual(len(response.json()["data"]["revisions"]), 1)
         self.assertEqual(response.json()["data"]["revisions"][0]["remark"], "首次入库")
 
+    def test_create_archive_should_reject_responsible_department_out_of_data_scope(self) -> None:
+        location_id = self._create_location()
+
+        response = self.client.post(
+            "/api/v1/archives/records/",
+            {
+                "archive_code": "A2026-0010",
+                "title": "跨范围建档测试",
+                "year": 2026,
+                "retention_period": "长期",
+                "security_level": SecurityClearance.INTERNAL,
+                "responsible_dept_id": self.business_department.id,
+                "responsible_person": "张三",
+                "formed_at": "2026-03-01",
+                "keywords": "档案,权限",
+                "summary": "用于测试跨范围建档拦截",
+                "page_count": 12,
+                "carrier_type": "纸质",
+                "location_id": location_id,
+                "revision_remark": "首次入库",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("所属范围外", response.json()["message"])
+        self.assertFalse(ArchiveRecord.objects.filter(archive_code="A2026-0010").exists())
+
+    def test_update_archive_should_reject_move_to_out_of_scope_department(self) -> None:
+        location_id = self._create_location()
+        archive = self._create_archive_record(
+            archive_code="A2026-0011",
+            title="档案范围更新测试",
+            responsible_dept=self.department,
+            location_id=location_id,
+        )
+
+        response = self.client.put(
+            f"/api/v1/archives/records/{archive.id}/",
+            {
+                "archive_code": archive.archive_code,
+                "title": archive.title,
+                "year": archive.year,
+                "retention_period": archive.retention_period,
+                "security_level": archive.security_level,
+                "responsible_dept_id": self.business_department.id,
+                "responsible_person": archive.responsible_person,
+                "formed_at": "2026-03-01",
+                "keywords": "档案,更新",
+                "summary": "用于测试跨范围更新拦截",
+                "page_count": 8,
+                "carrier_type": "纸质",
+                "location_id": location_id,
+                "revision_remark": "尝试调整责任部门",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("所属范围外", response.json()["message"])
+        archive.refresh_from_db()
+        self.assertEqual(archive.responsible_dept_id, self.department.id)
+
     def test_update_archive_should_create_revision_and_write_audit_log(self) -> None:
         location_id = self._create_location()
         next_location_response = self.client.post(

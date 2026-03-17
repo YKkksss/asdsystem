@@ -32,63 +32,6 @@ fullstack/
   runtime/   运行产物目录
 ```
 
-## 列表分页约定
-
-当前项目的高频列表接口已经支持可选服务端分页，推荐在列表页、大数据场景和报表查询中统一使用：
-
-1. 当请求参数包含 `page`、`page_size` 或 `paginate=true` 时，接口返回分页结构：
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "items": [],
-    "pagination": {
-      "page": 1,
-      "page_size": 20,
-      "total": 100,
-      "total_pages": 5,
-      "has_next": true,
-      "has_previous": false
-    }
-  }
-}
-```
-
-2. 当未传分页参数时，接口仍保持原有数组结构，兼容既有下拉框和旧调用。
-3. 当前已优先接入服务端分页的页面包括档案列表、借阅申请列表、借阅审批、借阅出库、借阅归还、销毁申请、扫描任务、通知中心、审计日志。
-
-## 工作台与导航约定
-
-最近一轮前端收口后，工作台、左侧菜单和常用深链已经统一到真实业务场景，当前约定如下：
-
-1. 工作台不再展示“项目开发说明”，而是按角色输出真实业务看板，包括核心指标、近期待办、业务动态、风险提醒、通知摘要与趋势信息。
-2. 左侧导航采用静态路由 + 权限裁剪的方式组织，按“工作台、档案业务、借阅业务、统计监督、系统管理”等父级菜单分组展示，页面入口保持固定，是否可见由当前账号权限决定。
-3. 当前前端已支持以下高频直达场景：
-   - 通知中心根据 `notificationId` 聚焦指定通知；
-   - 系统管理根据 `tab` 与 `userId` 直达指定标签页并自动打开编辑弹窗；
-   - 档案中心根据 `archiveId` 与 `fileId` 直达档案详情并高亮目标文件；
-   - 扫描任务详情根据 `itemId` 聚焦目标扫描明细卡片。
-4. 工作台中的待办项与通知摘要会直接返回前端可用的 `route_path`，用于审批、出库、归还、销毁审批与通知中心的就近跳转。
-
-## 通知脱敏与权限校验约定
-
-本轮联调补充了通知链路与文件访问权限的安全收口，当前约定如下：
-
-1. `verify_notification_channels` 管理命令、Webhook 验证日志、失败告警日志不会直接输出原始 Webhook 地址，统一只展示脱敏后的地址。
-2. Webhook 脱敏按“协议保留、主机分段脱敏、路径折叠”的方式输出，例如 `https://hooks.example.com/api/notify?token=abc` 会记录为 `https://h***s.e***e.com/***`。
-3. 邮件地址输出同样采用脱敏策略，避免在终端日志、巡检日志和命令回显中暴露完整账号。
-4. 文件预览、下载、摘要、责任者等敏感字段的可见性由后端按密级和责任人关系统一裁剪，前端只消费后端已脱敏结果，不做额外字段映射或前端侧伪权限判断。
-5. 前端 E2E 已同时覆盖“有权限访问”和“密级不足被限制”两类文件访问场景，确保页面不会在无权限时暴露预览或下载入口。
-6. 借阅中心读取权限已改为“接口入口权限 + scope 精确校验 + 详情联合可见范围”三层控制：
-   - `scope=mine` 仅允许具备借阅中心/归还提交能力的账号查看自己的申请；
-   - `scope=approval`、`scope=checkout`、`scope=return` 分别要求审批、出库、归还确认对应权限；
-   - 未显式传 `scope` 的详情访问会按“本人申请、当前审批、通知关联、待出库、待确认归还”等可见范围自动并集裁剪，避免自定义角色出现“按钮可见但详情 403”或“能进详情但列表为空”。
-7. `GET /api/v1/system/health/detail/` 已切换为“权限码优先，内网兜底”：
-   - 外网访问时需要 `button.system.health.detail` 或管理员角色；
-   - 内网、回环地址和链路本地自检仍可直接访问，便于部署探针、巡检脚本和启动联调复用同一接口。
-
 ## 启动与部署
 
 ## 一键部署
@@ -103,19 +46,27 @@ fullstack/
 2. 宿主机已安装 Docker Compose Plugin，即 `docker compose`
 3. 宿主机已开放目标访问端口，默认是 `8080`
 
-### 方式一：推荐脚本入口
+### 方式一：部署脚本一键启动(推荐)
 
 ```bash
 ./scripts/deploy.sh
 ```
-
+本脚本基于docker compose启动
 执行内容包括：
-
 1. 自动构建前端与后端镜像
 2. 自动启动 MySQL、Redis、后端、Celery Worker、Celery Beat、前端 Nginx
 3. 自动执行数据库迁移
 4. 自动初始化基础角色、部门和示例账号
-5. 自动在 `runtime/deployment_runtime/accounts.md` 输出账号清单
+5. 交互询问是否初始化演示用业务示例数据
+6. 自动在 `runtime/deployment_runtime/accounts.md` 输出账号清单
+
+示例数据初始化说明：
+
+1. 执行 `./scripts/deploy.sh` 时，脚本会提示 `是否初始化示例数据？(Y/N)`。
+2. 输入 `Y` 或 `y` 时，会额外初始化档案、借阅、销毁、数字化任务、通知与演示附件等业务示例数据。
+3. 输入 `N` 或 `n` 时，仅初始化基础账号、角色、权限和部门，不写入演示业务数据。
+4. 非交互环境可通过 `ASD_INIT_DEMO_DATA=true` 或 `ASD_INIT_DEMO_DATA=false` 显式指定是否初始化示例数据。
+5. 示例数据适用于演示和验收环境，不建议直接保留在正式生产库中。
 
 默认访问地址：
 
@@ -126,7 +77,7 @@ fullstack/
 初始化账号说明：
 
 - 一键部署完成后，请以 `runtime/deployment_runtime/accounts.md` 中的实际内容为准。
-- 管理员账号固定为 `admin`，密码优先使用环境变量 `ASD_ADMIN_PASSWORD`；如果未设置，部署脚本会自动生成随机密码并写入账号清单。
+- 管理员账号固定为 `admin`，密码优先使用环境变量 `ASD_ADMIN_PASSWORD`；如果未设置，则默认初始化为 `Admin12345`。
 - 固定示例账号：
 - 档案员：`archivist / Archivist12345`
 - 借阅人：`borrower / Borrower12345`
@@ -145,17 +96,18 @@ docker compose -f docker/docker-compose.deploy.yaml up -d --build
 3. 账号清单同样会输出到 `runtime/deployment_runtime/accounts.md`
 4. 默认关闭 `DEBUG` 与全量 CORS，并通过前端 Nginx 固定上游 Host，保证本机和常见内网访问可直接使用
 5. Docker 前端容器会直接提供 `/media/` 与 `/static/`，条码、二维码、缩略图和后台静态资源不再依赖 Django `DEBUG=true`
-6. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
+6. 如果需要同时初始化演示业务数据，可在执行前设置 `ASD_INIT_DEMO_DATA=true`
+7. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
 
 ```bash
-ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build
+ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 ASD_INIT_DEMO_DATA=true DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build
 ```
 
 ### 初始化默认账号
 
 以下账号来自 `fullstack/backend/apps/accounts/bootstrap_defaults.py`，适用于本地开发、接口联调和验收演示：
 
-1. 管理员：`admin / 由 ASD_ADMIN_PASSWORD 指定；若未指定则首次部署自动生成`
+1. 管理员：`admin / Admin12345`
 2. 档案员：`archivist / Archivist12345`
 3. 借阅人：`borrower / Borrower12345`
 4. 审计员：`auditor / Auditor12345`
@@ -163,7 +115,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 说明：
 
 1. 一键部署时，最终账号密码以 `runtime/deployment_runtime/accounts.md` 为准。
-2. 手工执行 `uv run manage.py bootstrap_system --username admin --password 你的安全密码` 时，管理员密码以命令参数为准，其余三个示例账号仍按上述默认值初始化。
+2. 手工执行 `uv run manage.py bootstrap_system --username admin --password 你的安全密码` 时，管理员密码以命令参数为准；如果通过 Docker 一键部署且未显式设置 `ASD_ADMIN_PASSWORD`，则会回退为 `Admin12345`。
 3. 首次登录后建议立即修改所有默认密码，避免继续使用示例口令。
 4. 当前内置角色的默认菜单职责如下：
    - 管理员：拥有全部菜单、按钮与系统配置权限。
@@ -238,6 +190,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 - 默认使用 SQLite 作为本地兜底数据库。
 - 如果需要接入 MySQL，请先执行 `uv sync --extra mysql`，再在 `.env` 中将 `DB_ENGINE` 改为 `mysql`，并补齐 `DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
 - 首次启动建议先执行 `bootstrap_system` 命令生成根部门、基础角色、各角色示例账号，并输出到 `runtime/deployment_runtime/accounts.md`。
+- 如需补充演示验收数据，可在基础账号初始化完成后执行 `uv run manage.py bootstrap_demo_data`。
 - 如果需要运行催还扫描、邮件发送、缩略图生成等异步链路，请同时启动 Redis、Celery Worker 和 Celery Beat。
 - 如果需要验证真实外部邮件 / Webhook 链路，可执行：
 

@@ -31,7 +31,6 @@
           <a-button :loading="submitting" block html-type="submit" size="large" type="primary">
             登录系统
           </a-button>
-          <RouterLink to="/">返回工作台</RouterLink>
         </div>
       </a-form>
     </section>
@@ -41,7 +40,6 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue"
 import { message } from "ant-design-vue"
-import { RouterLink } from "vue-router"
 import { useRoute, useRouter } from "vue-router"
 
 import { login } from "@/api/auth"

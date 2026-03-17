@@ -6,19 +6,18 @@ cd /app
 
 python scripts/wait_for_services.py 180 mysql:3306 redis:6379
 
-ADMIN_PASSWORD="${ASD_ADMIN_PASSWORD:-}"
-if [ -z "${ADMIN_PASSWORD}" ]; then
-  # 未显式传入管理员密码时自动生成一次性密码，并写入账号清单文件。
-  ADMIN_PASSWORD="$(python - <<'PY'
-import secrets
-import string
+ADMIN_PASSWORD="${ASD_ADMIN_PASSWORD:-Admin12345}"
 
-alphabet = string.ascii_letters + string.digits
-password = "".join(secrets.choice(alphabet) for _ in range(16))
-print(password)
-PY
-)"
-fi
+should_init_demo_data() {
+  case "${ASD_INIT_DEMO_DATA:-false}" in
+    1|true|TRUE|True|yes|YES|Yes|y|Y)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 uv run manage.py migrate --noinput
 uv run manage.py collectstatic --noinput
@@ -30,3 +29,11 @@ uv run manage.py bootstrap_system \
   --dept-code "${ASD_ROOT_DEPT_CODE:-ROOT}" \
   --dept-name "${ASD_ROOT_DEPT_NAME:-总部}" \
   --account-file "/deployment_runtime/accounts.md"
+
+if should_init_demo_data; then
+  echo "检测到 ASD_INIT_DEMO_DATA=${ASD_INIT_DEMO_DATA}，开始初始化示例数据。"
+  uv run manage.py bootstrap_demo_data \
+    --admin-username "${ASD_ADMIN_USERNAME:-admin}"
+else
+  echo "未启用示例数据初始化，仅保留基础账号与系统数据。"
+fi

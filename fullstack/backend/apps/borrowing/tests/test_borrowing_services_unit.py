@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -7,13 +8,20 @@ from rest_framework.exceptions import ValidationError
 
 from apps.accounts.models import SecurityClearance
 from apps.archives.models import ArchiveRecord, ArchiveStatus, ArchiveStorageLocation
-from apps.borrowing.models import BorrowApplication, BorrowApplicationStatus, BorrowReminderType
+from apps.borrowing.models import (
+    BorrowApplication,
+    BorrowApplicationStatus,
+    BorrowReminderSendStatus,
+    BorrowReminderType,
+)
 from apps.borrowing.services import (
     calculate_overdue_days,
+    create_email_reminder_record,
     resolve_borrow_reminder_type,
     sync_borrow_application_overdue_state,
     validate_borrow_application_creation,
 )
+from apps.notifications.services import process_email_task
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
 
@@ -35,6 +43,7 @@ class BorrowingServicesUnitTests(TestCase):
             password="BorrowUnit12345",
             real_name="借阅单元测试用户",
             dept=self.department,
+            email="borrow.unit@example.com",
             security_clearance_level=SecurityClearance.INTERNAL,
             status=True,
         )
@@ -153,3 +162,38 @@ class BorrowingServicesUnitTests(TestCase):
                 applicant=self.applicant,
                 expected_return_at=timezone.now() - timedelta(minutes=1),
             )
+
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=False,
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    )
+    def test_email_reminder_record_should_keep_pending_until_email_task_is_processed(self) -> None:
+        archive = self.create_archive(archive_code="A2026-BU006", status=ArchiveStatus.BORROWED)
+        application = self.create_application(
+            archive=archive,
+            status=BorrowApplicationStatus.OVERDUE,
+            expected_return_at=timezone.now() - timedelta(days=2),
+        )
+
+        with patch("apps.notifications.tasks.send_email_task.delay") as mocked_delay:
+            reminder_record = create_email_reminder_record(
+                application=application,
+                receiver_user=self.applicant,
+                reminder_type=BorrowReminderType.OVERDUE,
+                content="超期催还测试",
+            )
+
+        reminder_record.refresh_from_db()
+        reminder_record.email_task.refresh_from_db()
+
+        self.assertIsNotNone(reminder_record.email_task_id)
+        self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.PENDING)
+        self.assertEqual(reminder_record.email_task.send_status, "PENDING")
+        mocked_delay.assert_called_once_with(reminder_record.email_task_id)
+
+        process_email_task(reminder_record.email_task_id)
+        reminder_record.refresh_from_db()
+        reminder_record.email_task.refresh_from_db()
+
+        self.assertEqual(reminder_record.email_task.send_status, "SUCCESS")
+        self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.SUCCESS)

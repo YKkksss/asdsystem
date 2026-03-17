@@ -29,7 +29,7 @@ from apps.borrowing.models import (
     BorrowReturnRecord,
     BorrowReturnStatus,
 )
-from apps.notifications.models import NotificationType
+from apps.notifications.models import EmailTask, EmailTaskStatus, NotificationType
 from apps.notifications.services import create_email_task, create_system_notification, dispatch_email_task
 
 
@@ -496,6 +496,26 @@ def create_site_reminder_record(
     )
 
 
+def map_email_task_status_to_borrow_reminder_status(email_task_status: str) -> str:
+    status_mapping = {
+        EmailTaskStatus.PENDING: BorrowReminderSendStatus.PENDING,
+        EmailTaskStatus.RUNNING: BorrowReminderSendStatus.RUNNING,
+        EmailTaskStatus.SUCCESS: BorrowReminderSendStatus.SUCCESS,
+        EmailTaskStatus.FAILED: BorrowReminderSendStatus.FAILED,
+    }
+    return status_mapping.get(email_task_status, BorrowReminderSendStatus.PENDING)
+
+
+def sync_borrow_reminder_records_for_email_task(*, email_task: EmailTask) -> None:
+    update_kwargs = {
+        "send_status": map_email_task_status_to_borrow_reminder_status(email_task.send_status),
+        "updated_at": timezone.now(),
+    }
+    if email_task.sent_at:
+        update_kwargs["sent_at"] = email_task.sent_at
+    BorrowReminderRecord.objects.filter(email_task=email_task).update(**update_kwargs)
+
+
 def create_email_reminder_record(
     *,
     application: BorrowApplication,
@@ -515,21 +535,22 @@ def create_email_reminder_record(
         biz_type=BIZ_TYPE_BORROW_APPLICATION,
         biz_id=application.id,
     )
-    dispatch_email_task(email_task)
-    email_task.refresh_from_db()
-    return BorrowReminderRecord.objects.create(
+    reminder_record = BorrowReminderRecord.objects.create(
         application=application,
         reminder_type=reminder_type,
         channel=BorrowReminderChannel.EMAIL,
         receiver_user=receiver_user,
         receiver_email=receiver_email,
-        send_status=BorrowReminderSendStatus.FAILED
-        if email_task.send_status == "FAILED"
-        else BorrowReminderSendStatus.SUCCESS,
-        sent_at=email_task.sent_at or timezone.now(),
+        send_status=map_email_task_status_to_borrow_reminder_status(email_task.send_status),
+        sent_at=timezone.now(),
         content_summary=email_task.subject,
         email_task=email_task,
     )
+    dispatch_email_task(email_task)
+    email_task.refresh_from_db()
+    sync_borrow_reminder_records_for_email_task(email_task=email_task)
+    reminder_record.refresh_from_db()
+    return reminder_record
 
 
 @transaction.atomic
