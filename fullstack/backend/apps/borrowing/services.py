@@ -522,6 +522,7 @@ def create_email_reminder_record(
     receiver_user,
     reminder_type: str,
     content: str,
+    dispatch_on_commit: bool = False,
 ) -> BorrowReminderRecord | None:
     receiver_email = (receiver_user.email or "").strip()
     if not receiver_email:
@@ -546,10 +547,11 @@ def create_email_reminder_record(
         content_summary=email_task.subject,
         email_task=email_task,
     )
-    dispatch_email_task(email_task)
-    email_task.refresh_from_db()
-    sync_borrow_reminder_records_for_email_task(email_task=email_task)
-    reminder_record.refresh_from_db()
+    dispatch_email_task(email_task, defer_until_commit=dispatch_on_commit)
+    if not dispatch_on_commit or getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        email_task.refresh_from_db()
+        sync_borrow_reminder_records_for_email_task(email_task=email_task)
+        reminder_record.refresh_from_db()
     return reminder_record
 
 
@@ -599,6 +601,7 @@ def dispatch_borrow_reminder_for_application(application: BorrowApplication, now
                 receiver_user=receiver_user,
                 reminder_type=reminder_type,
                 content=content,
+                dispatch_on_commit=True,
             )
             if email_record:
                 created_records.append(email_record)

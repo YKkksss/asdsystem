@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import override_settings
@@ -8,8 +9,8 @@ from rest_framework.test import APIClient, APITestCase
 from apps.accounts.models import DataScope, Role, SecurityClearance, SystemPermission
 from apps.accounts.services import assign_permissions_to_role, assign_roles_to_user
 from apps.archives.models import ArchiveRecord, ArchiveStatus, ArchiveStorageLocation
+from apps.borrowing.models import BorrowApplication, BorrowReminderChannel, BorrowReminderRecord, BorrowReminderSendStatus
 from apps.digitization.models import ScanTask, ScanTaskItem
-from apps.borrowing.models import BorrowApplication
 from apps.notifications.models import NotificationType, SystemNotification
 from apps.organizations.models import Department
 from apps.organizations.services import sync_department_hierarchy
@@ -278,6 +279,36 @@ class NotificationApiTests(APITestCase):
         response = self.client.post("/api/v1/borrowing/reminders/dispatch/", format="json")
 
         self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=False,
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    )
+    def test_dispatch_reminder_should_enqueue_email_after_transaction_commit(self) -> None:
+        self.create_checked_out_application(
+            archive_code="A2026-N011",
+            expected_return_at=timezone.now() + timedelta(days=3),
+        )
+
+        self.client.force_authenticate(self.archivist_user)
+        with patch("apps.notifications.tasks.send_email_task.delay") as mocked_delay:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                response = self.client.post("/api/v1/borrowing/reminders/dispatch/", format="json")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["data"]["record_count"], 2)
+            self.assertEqual(len(callbacks), 1)
+            mocked_delay.assert_not_called()
+
+            email_record = BorrowReminderRecord.objects.get(channel=BorrowReminderChannel.EMAIL)
+            email_record.refresh_from_db()
+            email_record.email_task.refresh_from_db()
+            self.assertEqual(email_record.send_status, BorrowReminderSendStatus.PENDING)
+            self.assertEqual(email_record.email_task.send_status, "PENDING")
+
+            callbacks[0]()
+
+        mocked_delay.assert_called_once_with(email_record.email_task_id)
 
     def test_mark_all_read_should_batch_update_current_user_notifications(self) -> None:
         self.create_checked_out_application(

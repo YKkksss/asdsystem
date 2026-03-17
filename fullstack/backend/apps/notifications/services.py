@@ -185,6 +185,7 @@ def process_email_task(email_task_id: int) -> None:
 
     email_task = EmailTask.objects.filter(id=email_task_id).first()
     if not email_task:
+        logger.warning("邮件任务不存在，跳过发送。", extra={"email_task_id": email_task_id})
         return
 
     email_task.send_status = EmailTaskStatus.RUNNING
@@ -229,18 +230,27 @@ def process_email_task(email_task_id: int) -> None:
         )
 
 
-def dispatch_email_task(email_task: EmailTask) -> None:
+def _dispatch_email_task_now(email_task_id: int) -> None:
+    try:
+        from apps.notifications.tasks import send_email_task
+
+        send_email_task.delay(email_task_id)
+    except Exception:
+        logger.warning("Celery 邮件发送不可用，回退为同步发送", extra={"email_task_id": email_task_id})
+        process_email_task(email_task_id)
+
+
+def dispatch_email_task(email_task: EmailTask, *, defer_until_commit: bool = False) -> None:
     if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
         process_email_task(email_task.id)
         return
 
-    try:
-        from apps.notifications.tasks import send_email_task
+    if defer_until_commit and transaction.get_connection().in_atomic_block:
+        # 事务提交后再投递异步任务，避免 worker 抢跑导致读取不到刚创建的邮件任务。
+        transaction.on_commit(lambda email_task_id=email_task.id: _dispatch_email_task_now(email_task_id))
+        return
 
-        send_email_task.delay(email_task.id)
-    except Exception:
-        logger.warning("Celery 邮件发送不可用，回退为同步发送", extra={"email_task_id": email_task.id})
-        process_email_task(email_task.id)
+    _dispatch_email_task_now(email_task.id)
 
 
 def get_email_channel_diagnostics() -> dict[str, object]:

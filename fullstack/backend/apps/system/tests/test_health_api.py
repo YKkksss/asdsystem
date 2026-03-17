@@ -57,6 +57,12 @@ class HealthApiTests(TestCase):
             is_staff=True,
         )
         assign_roles_to_user(self.ops_user, [self.ops_role.id])
+        self.borrower_user = User.objects.create_user(
+            username="health_borrower",
+            password="HealthBorrower12345",
+            real_name="普通借阅用户",
+            dept=self.department,
+        )
 
     def test_root_health_returns_success(self) -> None:
         response = self.client.get(reverse("root-health"))
@@ -70,7 +76,9 @@ class HealthApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["service"], "backend")
 
-    def test_api_health_detail_returns_dependency_checks(self) -> None:
+    def test_api_health_detail_returns_dependency_checks_for_authorized_user(self) -> None:
+        self.client.force_login(self.ops_user)
+
         response = self.client.get("/api/v1/system/health/detail/")
 
         self.assertEqual(response.status_code, 200)
@@ -79,6 +87,11 @@ class HealthApiTests(TestCase):
         self.assertIn("usage_percent", response.json()["data"]["checks"]["storage"])
         self.assertNotIn("environment", response.json()["data"])
         self.assertNotIn("path", response.json()["data"]["checks"]["storage"])
+
+    def test_api_health_detail_should_reject_internal_anonymous_request(self) -> None:
+        response = self.client.get("/api/v1/system/health/detail/")
+
+        self.assertEqual(response.status_code, 401)
 
     def test_api_health_detail_should_reject_public_anonymous_request(self) -> None:
         response = self.client.get(
@@ -110,3 +123,10 @@ class HealthApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+
+    def test_api_health_detail_should_reject_internal_authenticated_user_without_permission(self) -> None:
+        self.client.force_login(self.borrower_user)
+
+        response = self.client.get("/api/v1/system/health/detail/")
+
+        self.assertEqual(response.status_code, 403)

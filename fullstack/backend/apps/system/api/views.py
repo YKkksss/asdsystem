@@ -1,7 +1,7 @@
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
-from apps.common.permissions import HasConfiguredSystemPermissionOrInternalRequest
+from apps.common.permissions import HasConfiguredSystemPermission
 from apps.common.response import success_response
 from apps.system.services import build_dashboard_payload, build_health_detail_payload, build_health_payload
 
@@ -23,7 +23,7 @@ class SystemHealthView(APIView):
 
 
 class SystemHealthDetailView(APIView):
-    permission_classes = [HasConfiguredSystemPermissionOrInternalRequest]
+    permission_classes = [HasConfiguredSystemPermission]
     required_permission_codes = {"button.system.health.detail"}
     permission_fallback_roles = {"ADMIN"}
 

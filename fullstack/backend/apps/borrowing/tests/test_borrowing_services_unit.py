@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -197,6 +198,40 @@ class BorrowingServicesUnitTests(TestCase):
 
         self.assertEqual(reminder_record.email_task.send_status, "SUCCESS")
         self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.SUCCESS)
+
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=False,
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    )
+    def test_create_email_reminder_record_should_dispatch_after_transaction_commit(self) -> None:
+        archive = self.create_archive(archive_code="A2026-BU006A", status=ArchiveStatus.BORROWED)
+        application = self.create_application(
+            archive=archive,
+            status=BorrowApplicationStatus.OVERDUE,
+            expected_return_at=timezone.now() - timedelta(days=2),
+        )
+
+        with patch("apps.notifications.tasks.send_email_task.delay") as mocked_delay:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                with transaction.atomic():
+                    reminder_record = create_email_reminder_record(
+                        application=application,
+                        receiver_user=self.applicant,
+                        reminder_type=BorrowReminderType.OVERDUE,
+                        content="超期催还延迟派发测试",
+                        dispatch_on_commit=True,
+                    )
+                    reminder_record.refresh_from_db()
+                    reminder_record.email_task.refresh_from_db()
+
+                    self.assertEqual(reminder_record.send_status, BorrowReminderSendStatus.PENDING)
+                    self.assertEqual(reminder_record.email_task.send_status, "PENDING")
+                    mocked_delay.assert_not_called()
+
+            self.assertEqual(len(callbacks), 1)
+            callbacks[0]()
+
+        mocked_delay.assert_called_once_with(reminder_record.email_task_id)
 
     @override_settings(
         CELERY_TASK_ALWAYS_EAGER=False,
