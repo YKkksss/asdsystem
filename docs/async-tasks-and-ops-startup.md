@@ -257,4 +257,4 @@ docker compose exec redis redis-cli ping
 3. 通过 `./ops/rotate_runtime_logs.sh` 处理脚本运行期日志
 4. 通过 `./ops/backup_system.sh` 和 `./ops/restore_system.sh` 完成备份恢复演练
 
-详细说明见 [日志监控与备份恢复说明.md](./%E6%97%A5%E5%BF%97%E7%9B%91%E6%8E%A7%E4%B8%8E%E5%A4%87%E4%BB%BD%E6%81%A2%E5%A4%8D%E8%AF%B4%E6%98%8E.md)。
+详细说明见 [logging-monitoring-backup-restore.md](./logging-monitoring-backup-restore.md)。

@@ -38,7 +38,7 @@ fullstack/
 
 如果你希望“不改配置文件、首次部署自动初始化、部署完成后直接登录使用”，请优先使用当前开发目录内的一键部署入口：
 
-详细说明见 [docs/一键部署说明.md](../docs/%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2%E8%AF%B4%E6%98%8E.md)。
+详细说明见 [docs/one-click-deployment.md](../docs/one-click-deployment.md)。
 
 前置条件：
 
@@ -168,7 +168,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 - `manage_services.sh` 不会停止外部手工启动的服务，只会停止它自己记录了 PID 的进程。
 - 如果 `127.0.0.1:6379` 上没有 Redis，脚本会尝试通过 `docker/docker-compose.yaml` 拉起 Redis 容器。
 - 运行期日志和 PID 会写入 `runtime/services/`。
-- 详细运维说明见 [docs/异步任务与运维启动说明.md](../docs/%E5%BC%82%E6%AD%A5%E4%BB%BB%E5%8A%A1%E4%B8%8E%E8%BF%90%E7%BB%B4%E5%90%AF%E5%8A%A8%E8%AF%B4%E6%98%8E.md)。
+- 详细运维说明见 [docs/async-tasks-and-ops-startup.md](../docs/async-tasks-and-ops-startup.md)。
 
 ### 运维脚本
 
@@ -179,7 +179,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 3. `./ops/backup_system.sh`：备份数据库、媒体文件和 `.env`
 4. `./ops/restore_system.sh`：按备份目录恢复数据库和媒体文件
 
-详细说明见 [docs/日志监控与备份恢复说明.md](../docs/%E6%97%A5%E5%BF%97%E7%9B%91%E6%8E%A7%E4%B8%8E%E5%A4%87%E4%BB%BD%E6%81%A2%E5%A4%8D%E8%AF%B4%E6%98%8E.md)。
+详细说明见 [docs/logging-monitoring-backup-restore.md](../docs/logging-monitoring-backup-restore.md)。
 
 ### 生产部署模板
 
@@ -191,7 +191,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.examp
 4. `deploy/env/`：生产环境变量示例
 5. `deploy/logrotate/`：日志轮转模板
 
-部署步骤与字段说明见 [docs/生产部署模板说明.md](../docs/%E7%94%9F%E4%BA%A7%E9%83%A8%E7%BD%B2%E6%A8%A1%E6%9D%BF%E8%AF%B4%E6%98%8E.md)。
+部署步骤与字段说明见 [docs/production-deployment-template-guide.md](../docs/production-deployment-template-guide.md)。
 
 ### 后端
 

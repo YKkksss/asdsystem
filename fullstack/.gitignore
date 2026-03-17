@@ -10,6 +10,7 @@ __pycache__/
 backend/.env
 backend/.venv/
 backend/db.sqlite3
+backend/celerybeat-schedule
 backend/media/
 backend/staticfiles/
 
@@ -23,3 +24,4 @@ runtime/test_results/
 runtime/backups/
 backend/logs/
 runtime/deployment_runtime/
+runtime/bootstrap_accounts.md

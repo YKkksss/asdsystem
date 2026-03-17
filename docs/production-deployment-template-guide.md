@@ -251,7 +251,7 @@ sudo logrotate -d /etc/logrotate.d/asd-system
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/system/health/
-curl -I https://easykitbox.com
+curl -I https://archive.example.com
 ```
 
 还应检查：

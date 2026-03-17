@@ -1,7 +1,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name easykitbox.com 154.217.240.44;
+    server_name archive.example.com www.archive.example.com;
 
     return 301 https://$host$request_uri;
 }
@@ -9,10 +9,10 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name easykitbox.com 154.217.240.44;
+    server_name archive.example.com www.archive.example.com;
 
-    ssl_certificate /etc/letsencrypt/live/easykitbox.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/easykitbox.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/archive.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/archive.example.com/privkey.pem;
     ssl_session_timeout 1d;
     ssl_session_cache shared:SSL:10m;
     ssl_protocols TLSv1.2 TLSv1.3;
