@@ -34,9 +34,10 @@ usage() {
   1. 默认执行 up，会自动判断是否需要构建镜像，并启动容器、执行迁移与基础初始化检查。
   2. 首次部署后，账号清单会输出到 runtime/deployment_runtime/accounts.md。
   3. 基础账号初始化只会在首次部署或基础数据缺失时自动执行，重复部署默认保留已有账号密码。
-  4. 如需自定义端口或管理员账号，可在执行前设置环境变量，例如：
+  4. 如需补充演示业务数据，请在部署完成后手动执行 ./scripts/init_demo_data.sh。
+  5. 如需自定义端口或管理员账号，可在执行前设置环境变量，例如：
      ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 ./scripts/deploy.sh
-  5. 如需强制重新构建本地镜像，可临时附加环境变量：
+  6. 如需强制重新构建本地镜像，可临时附加环境变量：
      ASD_FORCE_BUILD=true ./scripts/deploy.sh
 EOF
 }
@@ -231,8 +232,6 @@ up() {
 
   echo "正在执行一键部署..."
   (
-    # 当前阶段先固定关闭示例业务数据初始化，避免更新部署时覆盖已有演示数据。
-    export ASD_INIT_DEMO_DATA="false"
     cd "${FULLSTACK_DIR}" || exit 1
 
     if [[ "${#BUILD_TARGETS[@]}" -gt 0 ]]; then

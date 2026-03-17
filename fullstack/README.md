@@ -62,10 +62,11 @@ fullstack/
 
 说明：
 
-1. 当前部署脚本会固定关闭示例业务数据初始化，仅保留基础账号、角色、权限和部门。
+1. 当前部署脚本只负责基础账号、角色、权限和部门初始化，不再在部署过程中自动写入演示业务数据。
 2. 如果数据库卷被清空、基础账号被删除、权限项缺失，部署脚本会在启动时自动补齐基础数据。
 3. 如果只是二次更新且镜像、源码和基础数据都没有变化，则脚本会直接复用现有镜像和已有基础数据。
-4. 如需强制重新构建本地镜像，可在执行前临时附加 `ASD_FORCE_BUILD=true`。
+4. 如需补充演示或验收数据，请在部署完成后单独执行 `./scripts/init_demo_data.sh`。
+5. 如需强制重新构建本地镜像，可在执行前临时附加 `ASD_FORCE_BUILD=true`。
 
 默认访问地址：
 
@@ -96,12 +97,30 @@ docker compose -f docker/docker-compose.deploy.yaml up -d --build
 4. 默认关闭 `DEBUG` 与全量 CORS，并通过前端 Nginx 固定上游 Host，保证本机和常见内网访问可直接使用
 5. Docker 前端容器会直接提供 `/media/` 与 `/static/`，条码、二维码、缩略图和后台静态资源不再依赖 Django `DEBUG=true`
 6. `backend-init` 会在容器内自动判断基础系统数据是否缺失；如果数据库已完整初始化，则只执行迁移和静态资源同步，不重复重置默认账号密码
-7. 如果需要同时初始化演示业务数据，可在执行前显式设置 `ASD_INIT_DEMO_DATA=true`
+7. 如果需要补充演示业务数据，请在部署完成后单独执行 `./scripts/init_demo_data.sh`
 8. 如果需要自定义端口、管理员密码或生产域名白名单，可在执行前设置环境变量，例如：
 
 ```bash
-ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 ASD_INIT_DEMO_DATA=true DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build
+ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 DJANGO_ALLOWED_HOSTS=demo.example.com,127.0.0.1 docker compose -f docker/docker-compose.deploy.yaml up -d --build
 ```
+
+### 示例/测试数据初始化
+
+如需补充档案、借阅、销毁、通知等演示业务数据，请在基础部署完成后执行：
+
+```bash
+./scripts/init_demo_data.sh
+```
+
+可选：
+
+1. `./scripts/init_demo_data.sh docker`：在 Docker 部署环境中执行，适合一键部署后的初始化。
+2. `./scripts/init_demo_data.sh local`：在本地 `uv` 后端环境中执行。
+
+说明：
+
+1. 该脚本底层调用 `bootstrap_demo_data`，可重复执行，不会无限重复堆积同一批示例数据。
+2. 执行前请确保基础账号已经初始化完成。
 
 ### 初始化默认账号
 
@@ -190,7 +209,7 @@ ASD_HTTP_PORT=8080 ASD_ADMIN_PASSWORD=MyAdmin123 ASD_INIT_DEMO_DATA=true DJANGO_
 - 默认使用 SQLite 作为本地兜底数据库。
 - 如果需要接入 MySQL，请先执行 `uv sync --extra mysql`，再在 `.env` 中将 `DB_ENGINE` 改为 `mysql`，并补齐 `DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
 - 首次启动建议先执行 `bootstrap_system` 命令生成根部门、基础角色、各角色示例账号，并输出到 `runtime/deployment_runtime/accounts.md`。
-- 如需补充演示验收数据，可在基础账号初始化完成后执行 `uv run manage.py bootstrap_demo_data`。
+- 如需补充演示验收数据，可在基础账号初始化完成后执行 `./scripts/init_demo_data.sh local`，或直接执行 `uv run manage.py bootstrap_demo_data`。
 - 如果需要运行催还扫描、邮件发送、缩略图生成等异步链路，请同时启动 Redis、Celery Worker 和 Celery Beat。
 - 如果需要验证真实外部邮件 / Webhook 链路，可执行：
 
